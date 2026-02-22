@@ -9,8 +9,9 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsx src/index.ts",
-    "start": "node dist/index.js",
+    "dev": "tsx src/cli.ts start",
+    "start": "node dist/cli.js start",
+    "setup": "tsx src/cli.ts setup",
     "typecheck": "tsc --noEmit",
     "test": "tsx tests/runner.ts",
     "test:provider": "tsx tests/runner.ts http://127.0.0.1:3456",

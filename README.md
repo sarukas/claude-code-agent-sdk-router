@@ -6,79 +6,107 @@ A minimal, auditable API proxy that routes Claude Code and Agent SDK requests to
 
 ---
 
-## Why this exists
+## Prerequisites
 
-Claude Code speaks the Anthropic `/v1/messages` API. This proxy intercepts those calls and routes them to whichever provider you configure — letting you use Claude Code's tooling with Gemini, OpenAI, open-source models via Groq, or fully-offline models via Ollama.
-
-This project is a security-focused rewrite inspired by [musistudio/claude-code-router](https://github.com/musistudio/claude-code-router) and its core library [musistudio/llms](https://github.com/musistudio/llms). While those projects pioneered the approach, this fork diverges significantly with a focus on **auditability, minimal attack surface, and pinned dependencies**.
-
-## Design principles
-
-- **Fully auditable** — ~2,000 lines of TypeScript. One developer can read the entire codebase in an afternoon.
-- **No dynamic code loading** — zero `require()` of external files, no `vm` module, no plugin hooks, no agent injection. All provider wiring uses static TypeScript imports.
-- **Minimal dependencies** — 6 runtime deps (fastify, @fastify/cors, pino, pino-roll, json5, jsonrepair). Every version pinned exactly. `package-lock.json` committed.
-- **Localhost only** — binds to `127.0.0.1`, never `0.0.0.0`. No network exposure by default.
-- **No background daemon** — runs in the foreground. No PID files, no auto-start, no persistent process without explicit user action.
-- **No UI** — configuration is a single JSON file with comments.
-
-## What was removed vs. the original
-
-| Removed | Reason |
-|---------|--------|
-| Plugin system (`CCRPlugin`) | Arbitrary code execution surface |
-| Agent system (`IAgent`, tool injection) | Arbitrary code execution surface |
-| Preset marketplace / CDN fetching | Remote code/config injection risk |
-| Custom router scripts (`require()`) | Dynamic code loading |
-| Web UI (React package) | Unnecessary complexity |
-| Token counting / tiktoken | Not needed for routing |
-| Background daemon / service management | Attack surface reduction |
-| Provider registry CDN | Network dependency at startup |
-| 16+ transformer files | Only 3 kept + 4 new minimal ones written |
-
-## Supported providers
-
-| Provider | Type | Use case |
-|----------|------|----------|
-| **Anthropic** | Native pass-through | Route back to Anthropic API directly |
-| **OpenRouter** | OpenAI-compatible | Access many models through one API |
-| **Gemini** | Custom format | Google's models with tool call translation |
-| **OpenAI** | Native format | GPT-4o, GPT-4.1, etc. |
-| **Groq** | OpenAI-compatible | Fast Llama/Mixtral inference |
-| **Mistral** | OpenAI-compatible | Codestral and Mistral models |
-| **Ollama** | OpenAI-compatible | Fully offline local models |
-
-These 7 providers are hard-wired. No others can be added without modifying source code. This is intentional.
+- **Node.js >= 18.20** (uses native `fetch`)
+- API key(s) for at least one provider (or Ollama running locally)
 
 ## Quick start
 
 ```bash
-# Clone and install
+# 1. Clone and install
 git clone https://github.com/sarukas/claude-code-agent-sdk-router.git
 cd claude-code-agent-sdk-router
 npm install
 
-# Interactive setup — select providers, API keys, router models
-npx tsx src/cli.ts setup
+# 2. Run the interactive setup wizard
+npm run setup
+#    Walks you through: provider selection, API keys, router model tiers
+#    Writes config to ~/.ccasr/config.json
 
-# Start proxy + launch Claude Code in one command
+# 3. Launch Claude Code through the proxy
 npx tsx src/cli.ts run claude
+#    Starts the proxy on 127.0.0.1:3456, sets ANTHROPIC_BASE_URL and
+#    ANTHROPIC_API_KEY in claude's environment, shuts down when claude exits
 ```
 
-Or set up manually:
+That's it. Claude Code now routes through your configured providers.
+
+### Alternative: manual setup
+
+If you prefer to configure by hand instead of using the wizard:
 
 ```bash
+# Copy the example config and edit it
 mkdir -p ~/.ccasr
 cp config.example.json ~/.ccasr/config.json
-# Edit config.json — add your API keys
+# Edit ~/.ccasr/config.json — set your API keys and Router tiers
 
+# Start the proxy in a terminal
+npx tsx src/cli.ts start
+
+# In another terminal, point Claude Code at the proxy
 export ANTHROPIC_BASE_URL=http://127.0.0.1:3456
 export ANTHROPIC_API_KEY=ccasr-proxy
+claude
+```
+
+### Global install (optional)
+
+To use the `ccasr` command from anywhere:
+
+```bash
+npm run build
+npm install -g .
+
+# Now you can use:
+ccasr setup
+ccasr run claude
+ccasr start
+```
+
+## CLI
+
+| Command | Description |
+|---------|-------------|
+| `ccasr setup` | Interactive setup wizard — creates `~/.ccasr/config.json` |
+| `ccasr start` | Start the proxy server (foreground, Ctrl-C to stop) |
+| `ccasr run <command>` | Start proxy + launch command (e.g. `ccasr run claude`) |
+| `ccasr version` | Print version and Node version |
+| `ccasr help` | Show usage instructions |
+
+During development, prefix with `npx tsx src/cli.ts` instead of `ccasr`:
+
+```bash
+npx tsx src/cli.ts setup
+npx tsx src/cli.ts run claude
 npx tsx src/cli.ts start
+```
+
+### `ccasr setup`
+
+Interactive wizard that walks you through:
+
+1. **Provider selection** — toggle which providers to enable
+2. **API keys** — choose `$ENV_VAR` reference or paste key directly
+3. **Router tiers** — pick a model for sonnet (required), opus, and haiku tiers
+4. **Port** — default 3456
+
+Model choices come from `known_models.json` at the project root. Edit that file to add or reorder models.
+
+### `ccasr run`
+
+Starts the proxy server, injects `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` into the child process environment, then launches the given command with `stdio: 'inherit'` (full TTY passthrough). When the child exits, the proxy shuts down and the process exits with the child's exit code.
+
+```bash
+ccasr run claude                    # launch Claude Code
+ccasr run claude --model opus       # launch with flags
+ccasr run echo hello                # any command works
 ```
 
 ## Configuration
 
-Config lives at `~/.ccasr/config.json` (JSON5 — comments allowed).
+Config lives at `~/.ccasr/config.json` (JSON5 — comments allowed). Created automatically by `ccasr setup`, or copy from `config.example.json`.
 
 ```json5
 {
@@ -162,23 +190,19 @@ If a tier is not configured, it falls back to `sonnet`. The proxy replaces **bot
 
 Explicit `"provider,model"` prefix in requests (used by the test runner) bypasses tier routing entirely.
 
-## CLI
+## Supported providers
 
-```
-ccasr setup              # Interactive setup wizard — creates config
-ccasr start              # Start proxy server (foreground, Ctrl-C to stop)
-ccasr run <command>      # Start proxy + launch command (e.g. ccasr run claude)
-ccasr version            # Print version and Node version
-ccasr help               # Print usage instructions
-```
+| Provider | Type | Use case |
+|----------|------|----------|
+| **Anthropic** | Native pass-through | Route back to Anthropic API directly |
+| **OpenRouter** | OpenAI-compatible | Access many models through one API |
+| **Gemini** | Custom format | Google's models with tool call translation |
+| **OpenAI** | Native format | GPT-4o, GPT-4.1, etc. |
+| **Groq** | OpenAI-compatible | Fast Llama/Mixtral inference |
+| **Mistral** | OpenAI-compatible | Codestral and Mistral models |
+| **Ollama** | OpenAI-compatible | Fully offline local models |
 
-### `ccasr setup`
-
-Interactive wizard that walks you through provider selection, API key configuration, and router model assignment. Creates `~/.ccasr/config.json`. Model choices come from `known_models.json` at the project root — edit that file to customize available models.
-
-### `ccasr run`
-
-Starts the proxy server, sets `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` in the child's environment, then launches the given command. When the child exits, the proxy shuts down automatically.
+These 7 providers are hard-wired. No others can be added without modifying source code. This is intentional.
 
 ## Logging
 
@@ -232,29 +256,44 @@ That's it. Two endpoints. Nothing else.
 ## Architecture
 
 ```
-Claude Code  ──▶  POST /v1/messages  ──▶  Router
-                                            │
-                    ┌───────────────────────┤
-                    ▼                       ▼
+Claude Code  -->  POST /v1/messages  -->  Router
+                                            |
+                    +-----------------------+
+                    v                       v
               TransformerIn          TransformerOut
-              (Anthropic → unified)  (unified → provider)
-                                            │
-                                            ▼
+              (Anthropic -> unified)  (unified -> provider)
+                                            |
+                                            v
                                      Provider API
-                                            │
-                                            ▼
+                                            |
+                                            v
                                      TransformerIn
-                                     (provider → unified)
-                                            │
-                                            ▼
+                                     (provider -> unified)
+                                            |
+                                            v
                                      TransformerOut
-                                     (unified → Anthropic)
-                                            │
-                                            ▼
+                                     (unified -> Anthropic)
+                                            |
+                                            v
                                      Claude Code
 ```
 
 Each provider has a transformer that converts between the Anthropic format Claude Code speaks and the provider's native format, using an OpenAI-compatible intermediate representation.
+
+## Why this exists
+
+Claude Code speaks the Anthropic `/v1/messages` API. This proxy intercepts those calls and routes them to whichever provider you configure — letting you use Claude Code's tooling with Gemini, OpenAI, open-source models via Groq, or fully-offline models via Ollama.
+
+This project is a security-focused rewrite inspired by [musistudio/claude-code-router](https://github.com/musistudio/claude-code-router) and its core library [musistudio/llms](https://github.com/musistudio/llms). While those projects pioneered the approach, this fork diverges significantly with a focus on **auditability, minimal attack surface, and pinned dependencies**.
+
+## Design principles
+
+- **Fully auditable** — ~2,000 lines of TypeScript. One developer can read the entire codebase in an afternoon.
+- **No dynamic code loading** — zero `require()` of external files, no `vm` module, no plugin hooks, no agent injection. All provider wiring uses static TypeScript imports.
+- **Minimal dependencies** — 6 runtime deps (fastify, @fastify/cors, pino, pino-roll, json5, jsonrepair). Every version pinned exactly. `package-lock.json` committed.
+- **Localhost only** — binds to `127.0.0.1`, never `0.0.0.0`. No network exposure by default.
+- **No background daemon** — runs in the foreground. No PID files, no auto-start, no persistent process without explicit user action.
+- **No UI** — configuration is a single JSON file with comments.
 
 ## Security model
 
