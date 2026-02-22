@@ -1,7 +1,7 @@
 // Interactive setup wizard — creates ~/.ccasr/config.json
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { join } from 'path';
 import { CONFIG_DIR, CONFIG_FILE } from '../core/services/config';
 import { SUPPORTED_PROVIDERS, type SupportedProvider } from '../core/types';
 import { PROVIDER_DEFAULTS } from './constants';
@@ -12,12 +12,12 @@ interface KnownModels {
 }
 
 function loadKnownModels(): KnownModels {
-  // Resolve known_models.json relative to this file's compiled location
-  // In dev (tsx): src/cli/setup.ts -> ../../known_models.json
-  // In dist: dist/cli/setup.js -> ../../known_models.json
+  // Try cwd first (normal usage), then __dirname-relative (compiled/global install)
   const candidates = [
-    join(__dirname, '..', '..', 'known_models.json'),
     join(process.cwd(), 'known_models.json'),
+    ...(typeof __dirname !== 'undefined'
+      ? [join(__dirname, '..', '..', 'known_models.json')]
+      : []),
   ];
   for (const p of candidates) {
     if (existsSync(p)) {
