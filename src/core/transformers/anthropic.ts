@@ -22,6 +22,7 @@ export class AnthropicTransformer implements Transformer {
       config: {
         headers: {
           'x-api-key': provider.api_key,
+          'anthropic-version': '2023-06-01',
           'authorization': undefined,
         } as Record<string, string | undefined>,
       },
