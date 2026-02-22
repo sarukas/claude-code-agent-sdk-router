@@ -36,7 +36,7 @@ export async function createServer(configPath?: string, activeRoute?: string): P
 
   // Create capture logger for per-provider JSONL data capture
   if (appConfig.LOG) {
-    context.capture = new CaptureLogger(LOGS_DIR);
+    context.capture = new CaptureLogger(LOGS_DIR, appConfig.ActiveRoute);
   }
 
   // Build logger config.

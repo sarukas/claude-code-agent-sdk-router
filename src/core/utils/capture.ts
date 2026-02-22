@@ -1,4 +1,4 @@
-// Per-provider JSONL capture logger for 4-point request/response pipeline debugging.
+// Per-route JSONL capture logger for 4-point request/response pipeline debugging.
 //
 // Capture points:
 //   1. claude_in    — raw request from Claude Code (Anthropic format)
@@ -6,23 +6,25 @@
 //   3. provider_in  — raw response from provider API (before transformation)
 //   4. claude_out   — final response returned to Claude Code (Anthropic format)
 //
-// Each provider gets its own file: capture-{provider}.jsonl
+// Log file is named after the active route set: capture-{routeName}.jsonl
 
 import { appendFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
 export class CaptureLogger {
   private dir: string;
+  private filePath: string;
 
-  constructor(logsDir: string) {
+  constructor(logsDir: string, routeName: string) {
     this.dir = logsDir;
+    this.filePath = join(this.dir, `capture-${routeName}.jsonl`);
     mkdirSync(this.dir, { recursive: true });
   }
 
   /** Log a non-streaming data point as a single JSONL line */
   log(provider: string, point: string, data: Record<string, any>): void {
     const line = JSON.stringify({ ts: new Date().toISOString(), point, ...data }) + '\n';
-    appendFileSync(join(this.dir, `capture-${provider}.jsonl`), line);
+    appendFileSync(this.filePath, line);
   }
 
   /**
