@@ -1,25 +1,39 @@
 #!/usr/bin/env node
 // CLI — three commands only: start, version, help
 
-// TODO: Phase 4 — implement CLI commands
+import { startServer } from './core/server';
+
+const VERSION = '0.1.0';
+
 const command = process.argv[2];
 
 switch (command) {
   case 'start':
-    console.log('Starting server... (not yet implemented)');
+    startServer().catch((err) => {
+      console.error('Fatal error:', err.message || err);
+      process.exit(1);
+    });
     break;
+
   case 'version':
-    console.log('ccasr v0.1.0');
+    console.log(`ccasr v${VERSION}`);
+    console.log(`node ${process.version}`);
     break;
+
   case 'help':
   default:
     console.log(`
+ccasr v${VERSION} — Claude Code Agent SDK Router
+
 Usage: ccasr <command>
 
 Commands:
-  start     Start the proxy server (foreground)
+  start     Start the proxy server (foreground, Ctrl-C to stop)
   version   Print version info
   help      Show this help message
+
+Config:
+  ~/.ccasr/config.json (JSON5 — comments allowed)
 
 Setup:
   export ANTHROPIC_BASE_URL=http://127.0.0.1:3456

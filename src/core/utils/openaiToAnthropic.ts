@@ -1,8 +1,11 @@
-// Shared utility: convert OpenAI chat completion response to Anthropic /v1/messages format.
-// Used by OpenAI, Groq, Mistral, and Ollama transformers.
-
-// TODO: Phase 5a — implement shared response conversion
-export function openaiResponseToAnthropic(_response: unknown): unknown {
-  // Placeholder
-  return {};
-}
+// Shared utility: OpenAI ↔ Anthropic response conversion.
+//
+// The actual conversion logic lives in AnthropicTransformer.transformResponseIn
+// (streaming) and AnthropicTransformer.convertOpenAIResponseToAnthropic (JSON).
+//
+// OpenAI-compatible providers (OpenAI, Groq, Mistral, Ollama) don't need a
+// transformResponseOut step — their responses are already in OpenAI format.
+// The Anthropic transformer handles the final conversion to Anthropic format.
+//
+// This file is kept as documentation of the architecture decision.
+// No runtime code is needed here.

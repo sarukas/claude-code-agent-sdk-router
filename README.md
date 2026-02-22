@@ -14,7 +14,7 @@ This project is a security-focused rewrite inspired by [musistudio/claude-code-r
 
 ## Design principles
 
-- **Fully auditable** — ~1,400 lines of TypeScript. One developer can read the entire codebase in an afternoon.
+- **Fully auditable** — ~2,000 lines of TypeScript. One developer can read the entire codebase in an afternoon.
 - **No dynamic code loading** — zero `require()` of external files, no `vm` module, no plugin hooks, no agent injection. All provider wiring uses static TypeScript imports.
 - **Minimal dependencies** — 5 runtime deps (fastify, @fastify/cors, pino, json5, jsonrepair). Every version pinned exactly. `package-lock.json` committed.
 - **Localhost only** — binds to `127.0.0.1`, never `0.0.0.0`. No network exposure by default.
@@ -150,9 +150,9 @@ Config lives at `~/.ccasr/config.json` (JSON5 — comments allowed).
 ## CLI
 
 ```
-ccasr-minimal start     # Start proxy server (foreground, Ctrl-C to stop)
-ccasr-minimal version   # Print version and Node version
-ccasr-minimal help      # Print usage instructions
+ccasr start     # Start proxy server (foreground, Ctrl-C to stop)
+ccasr version   # Print version and Node version
+ccasr help      # Print usage instructions
 ```
 
 ## API endpoints

@@ -1,4 +1,7 @@
 // Entry point — loads config, starts server.
+import { startServer } from './core/server';
 
-// TODO: Phase 4 — implement boot sequence
-console.log('claude-code-agent-sdk-router — not yet implemented');
+startServer().catch((err) => {
+  console.error('Fatal error:', err.message || err);
+  process.exit(1);
+});

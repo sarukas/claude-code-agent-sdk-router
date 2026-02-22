@@ -5,10 +5,10 @@
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 1 | Repo scaffold, LICENSE, README, SECURITY.md, directory structure | DONE |
-| 2 | Inline core transformers (Anthropic, Gemini, OpenRouter) from llms | TODO |
-| 3 | Simplify services (Config, Provider, Transformer, Server) | TODO |
-| 4 | Routes, CLI, entry point, router logic | TODO |
-| 5a | New transformers (OpenAI, Groq, Mistral, Ollama) + shared utility | TODO |
+| 2 | Inline core transformers (Anthropic, Gemini, OpenRouter) from llms | DONE |
+| 3 | Simplify services (Config, Provider, Transformer, Server) | DONE |
+| 4 | Routes, CLI, entry point, router logic | DONE |
+| 5a | New transformers (OpenAI, Groq, Mistral, Ollama) + shared utility | DONE |
 | 5b | End-to-end verification against all 7 providers | TODO |
 | 6 | Dependency lock, npm audit, security verification | TODO |
 | 7 | Final docs, code review, LOC count | TODO |

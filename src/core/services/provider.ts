@@ -3,15 +3,28 @@
 
 import type { ProviderConfig, SupportedProvider } from '../types';
 
-// TODO: Phase 3 — implement provider resolution
 export class ProviderService {
-  private providers: Map<string, ProviderConfig> = new Map();
+  private providers = new Map<string, ProviderConfig>();
 
-  register(config: ProviderConfig): void {
-    this.providers.set(config.name, config);
+  constructor(providers: ProviderConfig[]) {
+    for (const p of providers) {
+      this.providers.set(p.name, p);
+    }
   }
 
-  get(name: SupportedProvider): ProviderConfig | undefined {
+  get(name: string): ProviderConfig | undefined {
     return this.providers.get(name);
+  }
+
+  getAll(): ProviderConfig[] {
+    return Array.from(this.providers.values());
+  }
+
+  has(name: string): boolean {
+    return this.providers.has(name);
+  }
+
+  getNames(): string[] {
+    return Array.from(this.providers.keys());
   }
 }

@@ -1,9 +1,111 @@
 // Fastify server — no plugin hooks, no agent hooks, no APIKEY middleware.
 // Binds to 127.0.0.1 only.
 
+import Fastify, { type FastifyInstance } from 'fastify';
+import cors from '@fastify/cors';
 import type { AppConfig } from './types';
+import { ConfigService } from './services/config';
+import { ProviderService } from './services/provider';
+import { TransformerService } from './services/transformer';
+import { errorHandler } from './api/middleware';
+import { registerRoutes } from './api/routes';
 
-// TODO: Phase 3 — implement Fastify server setup
-export async function createServer(_config: AppConfig): Promise<void> {
-  // Placeholder
+export interface ServerContext {
+  config: ConfigService;
+  providers: ProviderService;
+  transformers: TransformerService;
+}
+
+export async function createServer(configPath?: string): Promise<{ app: FastifyInstance; context: ServerContext }> {
+  // Load config
+  const config = new ConfigService(configPath);
+  const appConfig = config.getConfig();
+
+  // Create services
+  const providers = new ProviderService(appConfig.Providers);
+  const transformers = new TransformerService();
+
+  const context: ServerContext = { config, providers, transformers };
+
+  // Create Fastify instance
+  const app = Fastify({
+    logger: appConfig.LOG ? {
+      level: 'debug',
+    } : {
+      level: 'info',
+    },
+    bodyLimit: 50 * 1024 * 1024, // 50MB for large context windows
+  });
+
+  // Register error handler
+  app.setErrorHandler(errorHandler);
+
+  // Register CORS
+  await app.register(cors);
+
+  // Decorate with context
+  app.decorate('serverContext', context);
+
+  // PreHandler: log request bodies when LOG is enabled
+  if (appConfig.LOG) {
+    app.addHook('preHandler', (request, _reply, done) => {
+      if (request.url.startsWith('/v1/messages') && request.body) {
+        request.log.info({ data: request.body, type: 'request body' });
+      }
+      done();
+    });
+  }
+
+  // PreHandler: extract provider,model from request body
+  app.addHook('preHandler', async (request, reply) => {
+    if (request.method !== 'POST' || !request.url.startsWith('/v1/')) return;
+
+    const body = request.body as any;
+    if (!body?.model) {
+      return reply.code(400).send({ error: { message: 'Missing model in request body', type: 'invalid_request' } });
+    }
+
+    // Parse "provider,model" format
+    const comma = (body.model as string).indexOf(',');
+    if (comma === -1) {
+      // No provider prefix — use default route
+      const route = config.parseRouterEntry(appConfig.Router.default);
+      (request as any).providerName = route.provider;
+      // Keep body.model as-is (it's already the model name)
+      return;
+    }
+
+    (request as any).providerName = body.model.substring(0, comma);
+    body.model = body.model.substring(comma + 1);
+  });
+
+  // Register routes
+  registerRoutes(app, context);
+
+  return { app, context };
+}
+
+export async function startServer(configPath?: string): Promise<void> {
+  const { app, context } = await createServer(configPath);
+  const port = context.config.get('PORT');
+
+  try {
+    const address = await app.listen({ port, host: '127.0.0.1' });
+    app.log.info(`Server listening on ${address}`);
+    console.log(`\nccasr running on http://127.0.0.1:${port}`);
+    console.log(`\nTo use with Claude Code:`);
+    console.log(`  export ANTHROPIC_BASE_URL=http://127.0.0.1:${port}`);
+    console.log(`  export ANTHROPIC_API_KEY=any-non-empty-string\n`);
+
+    const shutdown = async (signal: string) => {
+      app.log.info(`Received ${signal}, shutting down...`);
+      await app.close();
+      process.exit(0);
+    };
+    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+  } catch (err) {
+    app.log.error(err);
+    process.exit(1);
+  }
 }
