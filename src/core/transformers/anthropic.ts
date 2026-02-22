@@ -136,7 +136,7 @@ export class AnthropicTransformer implements Transformer {
     if (request.thinking) {
       result.reasoning = {
         effort: getThinkLevel(request.thinking.budget_tokens),
-        enabled: request.thinking.type === 'enabled',
+        enabled: request.thinking.type !== 'disabled',
       };
     }
 
