@@ -3,7 +3,7 @@
 // explicitly save or discard.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import JSON5 from 'json5';
 import { CONFIG_DIR, CONFIG_FILE } from '../core/services/config';
 import { SUPPORTED_PROVIDERS, type SupportedProvider } from '../core/types';
@@ -82,10 +82,10 @@ function formatRouterEntry(entry: string | undefined): string {
 // Load existing config into SetupState (preserving raw api_key values)
 // ---------------------------------------------------------------------------
 
-function loadExistingConfig(): SetupState | null {
-  if (!existsSync(CONFIG_FILE)) return null;
+function loadExistingConfig(configFile: string): SetupState | null {
+  if (!existsSync(configFile)) return null;
   try {
-    const raw = JSON5.parse(readFileSync(CONFIG_FILE, 'utf-8'));
+    const raw = JSON5.parse(readFileSync(configFile, 'utf-8'));
     const providers: SetupState['providers'] = [];
     if (Array.isArray(raw.Providers)) {
       for (const p of raw.Providers) {
@@ -396,7 +396,7 @@ async function editPort(state: SetupState): Promise<void> {
 // Save config
 // ---------------------------------------------------------------------------
 
-function saveConfig(state: SetupState): void {
+function saveConfig(state: SetupState, configFile: string): void {
   const config: Record<string, any> = {
     LOG: state.log,
     API_TIMEOUT_MS: 300000,
@@ -409,15 +409,15 @@ function saveConfig(state: SetupState): void {
     },
   };
 
-  mkdirSync(CONFIG_DIR, { recursive: true });
-  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2) + '\n', 'utf-8');
-  console.log(`\n  Config written to ${CONFIG_FILE}`);
+  mkdirSync(dirname(configFile), { recursive: true });
+  writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+  console.log(`\n  Config written to ${configFile}`);
 }
 
-async function validateConfig(): Promise<void> {
+async function validateConfig(configFile: string): Promise<void> {
   try {
     const { ConfigService } = await import('../core/services/config');
-    new ConfigService();
+    new ConfigService(configFile);
     console.log('  Config validated successfully.');
   } catch (err: any) {
     console.log(`  Warning: config validation failed — ${err.message}`);
@@ -463,7 +463,7 @@ const MENU_OPTIONS = [
   'Exit without saving',
 ];
 
-async function mainMenuLoop(state: SetupState, knownModels: KnownModels): Promise<void> {
+async function mainMenuLoop(state: SetupState, knownModels: KnownModels, configFile: string): Promise<void> {
   while (true) {
     printSummary(state);
 
@@ -507,8 +507,8 @@ async function mainMenuLoop(state: SetupState, knownModels: KnownModels): Promis
           console.log('  Cannot save: no providers configured.');
           break;
         }
-        saveConfig(state);
-        await validateConfig();
+        saveConfig(state, configFile);
+        await validateConfig(configFile);
         printNextSteps(state.port);
         return;
 
@@ -523,20 +523,25 @@ async function mainMenuLoop(state: SetupState, knownModels: KnownModels): Promis
 // Entry point
 // ---------------------------------------------------------------------------
 
-export async function runSetup(): Promise<void> {
+export async function runSetup(configPath?: string): Promise<void> {
+  const configFile = configPath || CONFIG_FILE;
+
   console.log('\n  ccasr setup — configure your proxy\n');
+  if (configPath) {
+    console.log(`  Using config path: ${configFile}\n`);
+  }
 
   const knownModels = loadKnownModels();
-  const existing = loadExistingConfig();
+  const existing = loadExistingConfig(configFile);
 
   let state: SetupState;
 
   if (existing && existing.providers.length > 0) {
-    console.log(`  Loaded existing config from ${CONFIG_FILE}`);
+    console.log(`  Loaded existing config from ${configFile}`);
     state = existing;
   } else {
     state = await runInitialWizard(knownModels);
   }
 
-  await mainMenuLoop(state, knownModels);
+  await mainMenuLoop(state, knownModels, configFile);
 }

@@ -1,5 +1,15 @@
 // Test runner — discovers configured providers, runs all test suites, prints summary.
-// Usage: npx tsx tests/runner.ts [baseUrl]
+//
+// Usage:
+//   npx tsx tests/runner.ts [baseUrl] [provider] [test]
+//   npx tsx tests/runner.ts --config path/to/config.json [baseUrl] [provider] [test]
+//
+// The --config flag tells the runner which config to read for provider/model
+// discovery. It does NOT change the server's config — the server must already
+// be running with the matching config.
+//
+// SDK tests iterate ALL models in each provider's models[] array,
+// so you get coverage across e.g. all 5 OpenRouter models.
 
 import { readFileSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -18,8 +28,8 @@ import * as mistralTests from './providers/mistral';
 import * as ollamaTests from './providers/ollama';
 import * as agentSdkTests from './agent-sdk';
 
-const CONFIG_DIR = join(homedir(), '.ccasr');
-const LOGS_DIR = join(CONFIG_DIR, 'logs');
+const DEFAULT_CONFIG_DIR = join(homedir(), '.ccasr');
+const DEFAULT_LOGS_DIR = join(DEFAULT_CONFIG_DIR, 'logs');
 
 interface ProviderSuite {
   providerName: string;
@@ -37,16 +47,43 @@ const ALL_SUITES: ProviderSuite[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Arg parsing
+// ---------------------------------------------------------------------------
+
+function parseArgs(argv: string[]): {
+  configPath: string;
+  baseUrl: string;
+  filterProvider?: string;
+  filterTest?: string;
+} {
+  const args = argv.slice(2); // skip node + script
+  let configPath = join(DEFAULT_CONFIG_DIR, 'config.json');
+  let positional: string[] = [];
+
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--config' && i + 1 < args.length) {
+      configPath = args[++i];
+    } else {
+      positional.push(args[i]);
+    }
+  }
+
+  return {
+    configPath,
+    baseUrl: positional[0] || 'http://127.0.0.1:3456',
+    filterProvider: positional[1],
+    filterTest: positional[2],
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
 async function main() {
-  const baseUrl = process.argv[2] || 'http://127.0.0.1:3456';
-  const filterProvider = process.argv[3]; // optional: run only one provider
-  const filterTest = process.argv[4];     // optional: run only one test name
+  const { configPath, baseUrl, filterProvider, filterTest } = parseArgs(process.argv);
 
   // Load config to discover configured providers
-  const configPath = join(CONFIG_DIR, 'config.json');
   let config: any;
   try {
     config = JSON5.parse(readFileSync(configPath, 'utf-8'));
@@ -64,6 +101,7 @@ async function main() {
   console.log('  ccasr test runner');
   console.log('========================================');
   console.log(`  Target:     ${baseUrl}`);
+  console.log(`  Config:     ${configPath}`);
   console.log(`  Providers:  ${[...configuredProviders.keys()].join(', ')}`);
   if (filterProvider) console.log(`  Filter:     provider=${filterProvider}`);
   if (filterTest) console.log(`  Filter:     test=${filterTest}`);
@@ -85,7 +123,7 @@ async function main() {
   const allResults: TestResult[] = [];
   const startTime = Date.now();
 
-  // Run provider suites
+  // Run provider suites (use first model only — these are basic provider sanity tests)
   for (const suite of ALL_SUITES) {
     if (filterProvider && suite.providerName !== filterProvider) continue;
     if (!configuredProviders.has(suite.providerName)) {
@@ -94,7 +132,7 @@ async function main() {
     }
 
     const providerConfig = configuredProviders.get(suite.providerName);
-    const model = getModel(suite.providerName, providerConfig, config.Router);
+    const model = getFirstModel(suite.providerName, providerConfig, config.Router);
 
     const ctx: TestContext = {
       baseUrl,
@@ -117,13 +155,13 @@ async function main() {
     allResults.push(...results);
   }
 
-  // Run Agent SDK suite against each configured provider
+  // Run Agent SDK suite — iterate ALL models per provider
   if (!filterProvider || filterProvider === 'agent-sdk' || filterProvider.startsWith('agent-sdk:')) {
     const sdkProviderFilter = filterProvider?.startsWith('agent-sdk:')
       ? filterProvider.split(':')[1]
       : undefined;
 
-    // Build list of providers to run SDK tests against
+    // Build list of (provider, model) targets — one entry per model
     const sdkTargets: Array<{ provider: string; model: string; label: string }> = [];
 
     for (const suite of ALL_SUITES) {
@@ -131,17 +169,19 @@ async function main() {
       if (!configuredProviders.has(suite.providerName)) continue;
 
       const providerConfig = configuredProviders.get(suite.providerName);
-      const model = getModel(suite.providerName, providerConfig, config.Router);
-      sdkTargets.push({
-        provider: suite.providerName,
-        model,
-        label: `agent-sdk:${suite.providerName}`,
-      });
+      const models = getAllModels(suite.providerName, providerConfig, config.Router);
+
+      for (const model of models) {
+        sdkTargets.push({
+          provider: suite.providerName,
+          model,
+          label: `agent-sdk:${suite.providerName}`,
+        });
+      }
     }
 
-    // If no specific provider filter, also handle filterProvider === 'agent-sdk' (run all)
+    // Fallback if filterProvider === 'agent-sdk' matched nothing
     if (sdkTargets.length === 0 && filterProvider === 'agent-sdk') {
-      // Fallback to default route if no providers matched
       const defaultRoute = parseRoute(config.Router.sonnet || config.Router.default);
       sdkTargets.push({
         provider: defaultRoute.provider,
@@ -197,11 +237,12 @@ async function main() {
   console.log('========================================\n');
 
   // Write results to log file
-  mkdirSync(LOGS_DIR, { recursive: true });
-  const logPath = join(LOGS_DIR, 'test-results.json');
+  mkdirSync(DEFAULT_LOGS_DIR, { recursive: true });
+  const logPath = join(DEFAULT_LOGS_DIR, 'test-results.json');
   const logContent = JSON.stringify({
     timestamp: new Date().toISOString(),
     baseUrl,
+    configPath,
     durationSeconds: parseFloat(totalTime),
     summary: { passed, failed, expectedFail, total },
     results: allResults,
@@ -233,18 +274,32 @@ function parseRoute(entry: string): { provider: string; model: string } {
   return { provider: entry.substring(0, i), model: entry.substring(i + 1) };
 }
 
-function getModel(provider: string, providerConfig: any, router: any): string {
-  // Use first model from provider config
+/** Return the first model for a provider (for basic provider tests) */
+function getFirstModel(provider: string, providerConfig: any, router: any): string {
   if (providerConfig.models && providerConfig.models.length > 0) {
     return providerConfig.models[0];
   }
-  // Fall back to Router entries
   for (const [, entry] of Object.entries(router) as [string, string][]) {
     if (entry.startsWith(provider + ',')) {
       return entry.split(',').slice(1).join(',');
     }
   }
   return 'default';
+}
+
+/** Return ALL models for a provider (for SDK multi-model tests) */
+function getAllModels(provider: string, providerConfig: any, router: any): string[] {
+  if (providerConfig.models && providerConfig.models.length > 0) {
+    return providerConfig.models;
+  }
+  // Fall back to models referenced in Router entries
+  const models: string[] = [];
+  for (const [, entry] of Object.entries(router) as [string, string][]) {
+    if (entry.startsWith(provider + ',')) {
+      models.push(entry.split(',').slice(1).join(','));
+    }
+  }
+  return models.length > 0 ? models : ['default'];
 }
 
 main().catch((err) => {

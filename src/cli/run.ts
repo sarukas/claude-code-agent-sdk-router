@@ -3,7 +3,7 @@
 import { spawn } from 'child_process';
 import { createServer } from '../core/server';
 
-export async function runCommand(args: string[]): Promise<void> {
+export async function runCommand(args: string[], configPath?: string): Promise<void> {
   if (args.length === 0) {
     console.error('Usage: ccasr run <command> [args...]');
     console.error('Example: ccasr run claude');
@@ -14,7 +14,7 @@ export async function runCommand(args: string[]): Promise<void> {
   const cmdArgs = args.slice(1);
 
   // 1. Start proxy server
-  const { app, context } = await createServer();
+  const { app, context } = await createServer(configPath);
   const port = context.config.get('PORT');
 
   try {
