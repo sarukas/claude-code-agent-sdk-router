@@ -117,26 +117,58 @@ async function main() {
     allResults.push(...results);
   }
 
-  // Run Agent SDK suite against the default route
-  if (!filterProvider || filterProvider === 'agent-sdk') {
-    const defaultRoute = parseRoute(config.Router.sonnet || config.Router.default);
-    const sdkCtx: TestContext = {
-      baseUrl,
-      provider: defaultRoute.provider,
-      model: defaultRoute.model,
-      apiKey: 'test-key',
-    };
+  // Run Agent SDK suite against each configured provider
+  if (!filterProvider || filterProvider === 'agent-sdk' || filterProvider.startsWith('agent-sdk:')) {
+    const sdkProviderFilter = filterProvider?.startsWith('agent-sdk:')
+      ? filterProvider.split(':')[1]
+      : undefined;
 
-    let sdkTests = agentSdkTests.tests;
-    if (filterTest) {
-      sdkTests = sdkTests.filter(t => t.name === filterTest);
+    // Build list of providers to run SDK tests against
+    const sdkTargets: Array<{ provider: string; model: string; label: string }> = [];
+
+    for (const suite of ALL_SUITES) {
+      if (sdkProviderFilter && suite.providerName !== sdkProviderFilter) continue;
+      if (!configuredProviders.has(suite.providerName)) continue;
+
+      const providerConfig = configuredProviders.get(suite.providerName);
+      const model = getModel(suite.providerName, providerConfig, config.Router);
+      sdkTargets.push({
+        provider: suite.providerName,
+        model,
+        label: `agent-sdk:${suite.providerName}`,
+      });
     }
 
-    if (sdkTests.length > 0) {
-      console.log(`\n--- agent-sdk (${defaultRoute.provider}/${defaultRoute.model}) ---`);
-      const sdkResults = await runTests('agent-sdk', sdkTests, sdkCtx);
-      printResults(sdkResults);
-      allResults.push(...sdkResults);
+    // If no specific provider filter, also handle filterProvider === 'agent-sdk' (run all)
+    if (sdkTargets.length === 0 && filterProvider === 'agent-sdk') {
+      // Fallback to default route if no providers matched
+      const defaultRoute = parseRoute(config.Router.sonnet || config.Router.default);
+      sdkTargets.push({
+        provider: defaultRoute.provider,
+        model: defaultRoute.model,
+        label: 'agent-sdk',
+      });
+    }
+
+    for (const target of sdkTargets) {
+      const sdkCtx: TestContext = {
+        baseUrl,
+        provider: target.provider,
+        model: target.model,
+        apiKey: 'test-key',
+      };
+
+      let sdkTests = agentSdkTests.tests;
+      if (filterTest) {
+        sdkTests = sdkTests.filter(t => t.name === filterTest);
+      }
+
+      if (sdkTests.length > 0) {
+        console.log(`\n--- ${target.label} (${target.provider}/${target.model}) ---`);
+        const sdkResults = await runTests(target.label, sdkTests, sdkCtx);
+        printResults(sdkResults);
+        allResults.push(...sdkResults);
+      }
     }
   }
 
