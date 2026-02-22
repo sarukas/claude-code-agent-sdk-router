@@ -15,6 +15,17 @@ import type { ServerContext } from './core/server';
 import { createApiError } from './core/api/middleware';
 import { TRANSFORMERS } from './core/transformers/registry';
 
+function maskHeaders(headers: Record<string, string>): Record<string, string> {
+  const masked = { ...headers };
+  for (const key of Object.keys(masked)) {
+    const lower = key.toLowerCase();
+    if (lower === 'x-api-key' || lower === 'authorization') {
+      masked[key] = '***';
+    }
+  }
+  return masked;
+}
+
 export async function routeRequest(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -54,6 +65,8 @@ export async function routeRequest(
       requestBody = auth.body;
       requestConfig = auth.config || {};
     }
+    // Anthropic API needs the /v1/messages path appended to the base URL
+    requestConfig.url = new URL('/v1/messages', provider.api_base_url);
   } else {
     // Non-Anthropic: convert Anthropic format → unified → provider format
     // Step 1: Anthropic → unified (OpenAI) format
@@ -94,6 +107,20 @@ export async function routeRequest(
     }
   }
 
+  // Data capture: log outgoing request
+  const logEnabled = context.config.get('LOG');
+  if (logEnabled) {
+    request.log.info({
+      type: 'outgoing_request',
+      url: url.toString(),
+      provider: provider.name,
+      model: body.model,
+      stream: !!body.stream,
+      headers: maskHeaders(headers),
+      body: requestBody,
+    });
+  }
+
   // Send request to provider
   const timeoutMs = context.config.get('API_TIMEOUT_MS');
   const response = await fetch(url.toString(), {
@@ -103,9 +130,24 @@ export async function routeRequest(
     signal: AbortSignal.timeout(timeoutMs),
   });
 
+  // Data capture: log provider response status
+  if (logEnabled) {
+    request.log.info({
+      type: 'provider_response',
+      provider: provider.name,
+      status: response.status,
+      statusText: response.statusText,
+      stream: !!body.stream,
+      contentType: response.headers.get('content-type'),
+    });
+  }
+
   if (!response.ok) {
     const errorText = await response.text();
     request.log.error(`Provider error (${provider.name}, ${body.model}): ${response.status} ${errorText}`);
+    if (logEnabled) {
+      request.log.info({ type: 'provider_error_body', provider: provider.name, body: errorText });
+    }
     throw createApiError(
       `Provider error (${provider.name}): ${response.status} ${errorText}`,
       response.status,
@@ -132,12 +174,18 @@ export async function routeRequest(
 
   // Send response back to Claude Code
   if (body.stream) {
+    if (logEnabled) {
+      request.log.info({ type: 'streaming_response', provider: provider.name, model: body.model });
+    }
     reply.header('Content-Type', 'text/event-stream');
     reply.header('Cache-Control', 'no-cache');
     reply.header('Connection', 'keep-alive');
     return reply.send(finalResponse.body);
   } else {
     const json = await finalResponse.json();
+    if (logEnabled) {
+      request.log.info({ type: 'final_response', provider: provider.name, model: body.model, body: json });
+    }
     return reply.send(json);
   }
 }

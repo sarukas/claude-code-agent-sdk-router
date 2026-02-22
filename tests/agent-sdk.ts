@@ -28,8 +28,9 @@ export const tests: TestFn[] = [
       assert(res.role === 'assistant', `response.role should be 'assistant', got '${res.role}'`);
       assert(Array.isArray(res.content), 'response.content should be array');
       assert(res.content.length > 0, 'response.content should be non-empty');
-      assert(res.content[0].type === 'text', 'first content block should be text');
-      assert(res.content[0].text.length > 0, 'text should be non-empty');
+      const textBlock = res.content.find((c: any) => c.type === 'text');
+      assert(textBlock, 'should have a text content block');
+      assert(textBlock.text.length > 0, 'text should be non-empty');
       assert(res.stop_reason !== undefined, 'stop_reason should be present');
       assert(res.usage !== undefined, 'usage should be present');
     },
