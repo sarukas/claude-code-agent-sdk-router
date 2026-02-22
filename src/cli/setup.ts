@@ -23,6 +23,7 @@ interface SetupState {
   }>;
   router: { sonnet: string; opus?: string; haiku?: string };
   port: number;
+  log: boolean;
 }
 
 interface KnownModels {
@@ -108,6 +109,7 @@ function loadExistingConfig(): SetupState | null {
       providers,
       router,
       port: raw.PORT ?? 3456,
+      log: raw.LOG ?? false,
     };
   } catch {
     return null;
@@ -131,6 +133,7 @@ function printSummary(state: SetupState): void {
     Opus:       ${formatRouterEntry(state.router.opus)}
     Haiku:      ${formatRouterEntry(state.router.haiku)}
     Port:       ${state.port}
+    Logging:    ${state.log ? 'ON — full request/response capture' : 'OFF'}
 `);
 }
 
@@ -166,7 +169,7 @@ async function runInitialWizard(knownModels: KnownModels): Promise<SetupState> {
   const portStr = await promptInput('Port (press Enter for default 3456)', '3456');
   const port = parseInt(portStr, 10) || 3456;
 
-  return { providers, router, port };
+  return { providers, router, port, log: false };
 }
 
 async function collectApiKeys(
@@ -395,7 +398,7 @@ async function editPort(state: SetupState): Promise<void> {
 
 function saveConfig(state: SetupState): void {
   const config: Record<string, any> = {
-    LOG: false,
+    LOG: state.log,
     API_TIMEOUT_MS: 300000,
     PORT: state.port,
     Providers: state.providers,
@@ -455,6 +458,7 @@ const MENU_OPTIONS = [
   'Edit API keys',
   'Edit model routing',
   'Edit port',
+  'Toggle detailed logging',
   'Save and exit',
   'Exit without saving',
 ];
@@ -484,7 +488,16 @@ async function mainMenuLoop(state: SetupState, knownModels: KnownModels): Promis
         await editPort(state);
         break;
 
-      case 4: // Save and exit
+      case 4: // Toggle detailed logging
+        state.log = !state.log;
+        console.log(`  Detailed logging ${state.log ? 'enabled' : 'disabled'}.`);
+        if (state.log) {
+          console.log('  When ON: logs full request/response bodies, outgoing URLs, and headers.');
+          console.log('  Logs are written to ~/.ccasr/logs/ccasr.log and console.');
+        }
+        break;
+
+      case 5: // Save and exit
         if (!state.router.sonnet) {
           console.log('  Cannot save: Sonnet tier (required) is not configured.');
           console.log('  Please configure model routing first.');
@@ -499,7 +512,7 @@ async function mainMenuLoop(state: SetupState, knownModels: KnownModels): Promis
         printNextSteps(state.port);
         return;
 
-      case 5: // Exit without saving
+      case 6: // Exit without saving
         console.log('  Exiting without saving.\n');
         return;
     }
