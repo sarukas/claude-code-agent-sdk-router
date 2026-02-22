@@ -1,0 +1,65 @@
+{
+  // Emit request/response bodies to stdout. Keep false in production.
+  "LOG": false,
+
+  // Timeout for outbound API calls (ms)
+  "API_TIMEOUT_MS": 300000,
+
+  // Port the proxy listens on (must match ANTHROPIC_BASE_URL)
+  "PORT": 3456,
+
+  // Optional: route all outbound requests through an HTTP proxy
+  // "PROXY_URL": "http://your-corporate-proxy:8080",
+
+  "Providers": [
+    {
+      "name": "anthropic",
+      "api_base_url": "https://api.anthropic.com",
+      "api_key": "$ANTHROPIC_API_KEY"
+    },
+    {
+      "name": "openrouter",
+      "api_base_url": "https://openrouter.ai/api/v1/chat/completions",
+      "api_key": "$OPENROUTER_API_KEY",
+      "models": ["google/gemini-2.5-pro-preview", "anthropic/claude-sonnet-4"]
+    },
+    {
+      "name": "gemini",
+      "api_base_url": "https://generativelanguage.googleapis.com/v1beta/models/",
+      "api_key": "$GEMINI_API_KEY",
+      "models": ["gemini-2.5-flash", "gemini-2.5-pro"]
+    },
+    {
+      "name": "openai",
+      "api_base_url": "https://api.openai.com/v1/chat/completions",
+      "api_key": "$OPENAI_API_KEY",
+      "models": ["gpt-4o", "gpt-4.1"]
+    },
+    {
+      "name": "groq",
+      "api_base_url": "https://api.groq.com/openai/v1/chat/completions",
+      "api_key": "$GROQ_API_KEY",
+      "models": ["llama-3.3-70b-versatile", "moonshotai/kimi-k2-instruct"]
+    },
+    {
+      "name": "mistral",
+      "api_base_url": "https://api.mistral.ai/v1/chat/completions",
+      "api_key": "$MISTRAL_API_KEY",
+      "models": ["codestral-latest", "mistral-large-latest"]
+    },
+    {
+      "name": "ollama",
+      "api_base_url": "http://localhost:11434/v1/chat/completions",
+      "api_key": "ollama",
+      "models": ["qwen2.5-coder:latest"]
+    }
+  ],
+
+  // Route Claude Code requests to providers.
+  // Format: "providerName,modelName" — split on first comma.
+  // "default" is required. "background" is optional (falls back to default).
+  "Router": {
+    "default": "anthropic,claude-sonnet-4-20250514",
+    "background": "groq,llama-3.3-70b-versatile"
+  }
+}
