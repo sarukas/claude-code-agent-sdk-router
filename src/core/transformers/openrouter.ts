@@ -7,13 +7,13 @@
 //
 // Based on musistudio/llms openrouter.transformer.ts (MIT), simplified.
 
-import type { Transformer, UnifiedChatRequest } from '../types';
+import type { Transformer, UnifiedChatRequest, ProviderConfig } from '../types';
 import { generateToolId } from '../utils/id';
 
 export class OpenRouterTransformer implements Transformer {
   name = 'openrouter';
 
-  async transformRequestIn(request: UnifiedChatRequest): Promise<UnifiedChatRequest> {
+  async transformRequestIn(request: UnifiedChatRequest, provider: ProviderConfig): Promise<Record<string, any>> {
     const isClaude = request.model.includes('claude');
 
     for (const msg of request.messages) {
@@ -34,7 +34,16 @@ export class OpenRouterTransformer implements Transformer {
       }
     }
 
-    return request;
+    return {
+      body: request,
+      config: {
+        headers: {
+          'Authorization': `Bearer ${provider.api_key}`,
+          'HTTP-Referer': 'https://github.com/sarukas/claude-code-agent-sdk-router',
+          'X-Title': 'ccasr',
+        },
+      },
+    };
   }
 
   async transformResponseOut(response: Response): Promise<Response> {

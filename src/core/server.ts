@@ -94,7 +94,7 @@ export async function createServer(configPath?: string, activeRoute?: string, op
 
   // PreHandler: extract provider,model from request body
   app.addHook('preHandler', async (request, reply) => {
-    if (request.method !== 'POST' || !request.url.startsWith('/v1/')) return;
+    if (request.method !== 'POST' || !(request.url.startsWith('/v1/') || request.url.startsWith('/v1beta/'))) return;
 
     const body = request.body as any;
     if (!body?.model) {

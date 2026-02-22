@@ -17,6 +17,9 @@ import type { ProviderConfig, Transformer } from './core/types';
 import type { ServerContext } from './core/server';
 import { createApiError } from './core/api/middleware';
 import { TRANSFORMERS } from './core/transformers/registry';
+// undici is built into Node 18+ — use require to avoid needing @types/undici
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { ProxyAgent } = require('undici') as { ProxyAgent: new (url: string) => any };
 
 function maskHeaders(headers: Record<string, string>): Record<string, string> {
   const masked = { ...headers };
@@ -134,12 +137,17 @@ export async function routeRequest(
 
   // Send request to provider
   const timeoutMs = context.config.get('API_TIMEOUT_MS');
-  let response = await fetch(url.toString(), {
+  const proxyUrl = context.config.get('PROXY_URL');
+  const fetchOptions: any = {
     method: 'POST',
     headers,
     body: JSON.stringify(requestBody),
     signal: AbortSignal.timeout(timeoutMs),
-  });
+  };
+  if (proxyUrl) {
+    fetchOptions.dispatcher = new ProxyAgent(proxyUrl);
+  }
+  let response = await fetch(url.toString(), fetchOptions);
 
   if (!response.ok) {
     const errorText = await response.text();
