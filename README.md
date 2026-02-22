@@ -69,7 +69,7 @@ ccasr start
 
 | Command | Description |
 |---------|-------------|
-| `ccasr setup` | Interactive setup wizard — creates `~/.ccasr/config.json` |
+| `ccasr setup` | Interactive setup wizard — creates or edits `~/.ccasr/config.json` |
 | `ccasr start` | Start the proxy server (foreground, Ctrl-C to stop) |
 | `ccasr run <command>` | Start proxy + launch command (e.g. `ccasr run claude`) |
 | `ccasr version` | Print version and Node version |
@@ -85,12 +85,27 @@ npx tsx src/cli.ts start
 
 ### `ccasr setup`
 
-Interactive wizard that walks you through:
+Interactive, menu-driven configuration editor. On first run it walks you through provider selection, API keys, model routing, and port sequentially. On subsequent runs it loads your existing config and drops you into the main menu:
 
-1. **Provider selection** — toggle which providers to enable
-2. **API keys** — choose `$ENV_VAR` reference or paste key directly
-3. **Router tiers** — pick a model for sonnet (required), opus, and haiku tiers
-4. **Port** — default 3456
+```
+  Current configuration:
+
+    Providers:  Anthropic ($ANTHROPIC_API_KEY), Gemini ($GEMINI_API_KEY)
+    Sonnet:     anthropic / claude-sonnet-4-20250514
+    Opus:       (not configured)
+    Haiku:      gemini / gemini-2.5-flash
+    Port:       3456
+
+  Setup menu:
+  > Edit providers
+    Edit API keys
+    Edit model routing
+    Edit port
+    Save and exit
+    Exit without saving
+```
+
+All changes are held in memory until you choose **Save and exit** — nothing is written until then. API keys are masked in the summary (`$ENV_VAR` shown as-is, raw keys as `sk...7x2f`).
 
 Model choices come from `known_models.json` at the project root. Edit that file to add or reorder models.
 
