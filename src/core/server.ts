@@ -3,12 +3,16 @@
 
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
+import { mkdirSync } from 'fs';
+import { join } from 'path';
 import type { AppConfig } from './types';
-import { ConfigService } from './services/config';
+import { ConfigService, CONFIG_DIR } from './services/config';
 import { ProviderService } from './services/provider';
 import { TransformerService } from './services/transformer';
 import { errorHandler } from './api/middleware';
 import { registerRoutes } from './api/routes';
+
+const LOGS_DIR = join(CONFIG_DIR, 'logs');
 
 export interface ServerContext {
   config: ConfigService;
@@ -27,13 +31,38 @@ export async function createServer(configPath?: string): Promise<{ app: FastifyI
 
   const context: ServerContext = { config, providers, transformers };
 
+  // Build logger config with optional file transport
+  const logLevel = appConfig.LOG ? 'debug' : 'info';
+  const logToFile = appConfig.LOG_FILE !== false;
+
+  let loggerConfig: any = { level: logLevel };
+
+  if (logToFile) {
+    mkdirSync(LOGS_DIR, { recursive: true });
+    loggerConfig = {
+      level: logLevel,
+      transport: {
+        targets: [
+          // Console output
+          { target: 'pino/file', options: { destination: 1 }, level: logLevel },
+          // Rotating file output
+          {
+            target: 'pino-roll',
+            options: {
+              file: join(LOGS_DIR, 'ccasr.log'),
+              size: appConfig.LOG_MAX_SIZE || '10m',
+              limit: { count: appConfig.LOG_MAX_FILES || 5 },
+            },
+            level: 'info', // always info to file, debug only to console when LOG=true
+          },
+        ],
+      },
+    };
+  }
+
   // Create Fastify instance
   const app = Fastify({
-    logger: appConfig.LOG ? {
-      level: 'debug',
-    } : {
-      level: 'info',
-    },
+    logger: loggerConfig,
     bodyLimit: 50 * 1024 * 1024, // 50MB for large context windows
   });
 
@@ -68,10 +97,10 @@ export async function createServer(configPath?: string): Promise<{ app: FastifyI
     // Parse "provider,model" format
     const comma = (body.model as string).indexOf(',');
     if (comma === -1) {
-      // No provider prefix — use default route
-      const route = config.parseRouterEntry(appConfig.Router.default);
-      (request as any).providerName = route.provider;
-      // Keep body.model as-is (it's already the model name)
+      // No provider prefix — resolve tier from model name
+      const resolved = config.resolveModel(body.model);
+      (request as any).providerName = resolved.provider;
+      body.model = resolved.model;
       return;
     }
 
@@ -109,3 +138,5 @@ export async function startServer(configPath?: string): Promise<void> {
     process.exit(1);
   }
 }
+
+export { LOGS_DIR };

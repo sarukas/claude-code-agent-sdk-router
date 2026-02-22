@@ -29,9 +29,12 @@ export interface ProviderConfig {
   models?: string[];
 }
 
+export type ModelTier = 'opus' | 'sonnet' | 'haiku';
+
 export interface RouterConfig {
-  default: string;   // "providerName,modelName"
-  background?: string;
+  opus?: string;    // "provider,model" for claude-opus-* requests
+  sonnet: string;   // "provider,model" for claude-sonnet-* requests (required, fallback)
+  haiku?: string;   // "provider,model" for claude-haiku-* requests
 }
 
 export interface AppConfig {
@@ -39,6 +42,9 @@ export interface AppConfig {
   API_TIMEOUT_MS: number;
   PORT: number;
   PROXY_URL?: string;
+  LOG_FILE?: boolean;       // default true — write logs to ~/.ccasr/logs/
+  LOG_MAX_SIZE?: string;    // default '10m' — rotate at this size
+  LOG_MAX_FILES?: number;   // default 5 — keep this many rotated files
   Providers: ProviderConfig[];
   Router: RouterConfig;
 }

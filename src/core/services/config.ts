@@ -7,8 +7,14 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import JSON5 from 'json5';
-import type { AppConfig, ProviderConfig, SupportedProvider } from '../types';
+import type { AppConfig, ModelTier, ProviderConfig, SupportedProvider } from '../types';
 import { SUPPORTED_PROVIDERS } from '../types';
+
+const MODEL_TIER_PATTERNS: Array<{ tier: ModelTier; match: string }> = [
+  { tier: 'opus',   match: 'opus' },
+  { tier: 'haiku',  match: 'haiku' },
+  { tier: 'sonnet', match: 'sonnet' },
+];
 
 const CONFIG_DIR = join(homedir(), '.ccasr');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
@@ -48,8 +54,11 @@ export class ConfigService {
       API_TIMEOUT_MS: raw.API_TIMEOUT_MS ?? DEFAULT_CONFIG.API_TIMEOUT_MS!,
       PORT: raw.PORT ?? DEFAULT_CONFIG.PORT!,
       PROXY_URL: raw.PROXY_URL,
+      LOG_FILE: raw.LOG_FILE !== false,         // default true
+      LOG_MAX_SIZE: raw.LOG_MAX_SIZE || '10m',
+      LOG_MAX_FILES: raw.LOG_MAX_FILES || 5,
       Providers: [],
-      Router: { default: '' },
+      Router: { sonnet: '' },
     };
 
     // Validate and interpolate providers
@@ -68,18 +77,28 @@ export class ConfigService {
     }
 
     // Validate Router
-    if (!raw.Router || !raw.Router.default) {
-      throw new Error('Config must have Router.default (e.g., "anthropic,claude-sonnet-4-20250514")');
+    if (!raw.Router) {
+      throw new Error('Config must have a Router section');
     }
 
-    config.Router = {
-      default: raw.Router.default,
-      background: raw.Router.background,
-    };
+    // Backward compat: migrate Router.default → Router.sonnet
+    const routerRaw = raw.Router;
+    const sonnetEntry = routerRaw.sonnet || routerRaw.default;
+    if (!sonnetEntry) {
+      throw new Error('Config must have Router.sonnet (e.g., "anthropic,claude-sonnet-4-20250514")');
+    }
 
-    this.validateRouterEntry('Router.default', config.Router.default, config.Providers);
-    if (config.Router.background) {
-      this.validateRouterEntry('Router.background', config.Router.background, config.Providers);
+    config.Router = { sonnet: sonnetEntry };
+    if (routerRaw.opus) config.Router.opus = routerRaw.opus;
+    if (routerRaw.haiku) config.Router.haiku = routerRaw.haiku;
+
+    // Validate all tier entries
+    this.validateRouterEntry('Router.sonnet', config.Router.sonnet, config.Providers);
+    if (config.Router.opus) {
+      this.validateRouterEntry('Router.opus', config.Router.opus, config.Providers);
+    }
+    if (config.Router.haiku) {
+      this.validateRouterEntry('Router.haiku', config.Router.haiku, config.Providers);
     }
 
     return config;
@@ -138,6 +157,23 @@ export class ConfigService {
       provider: entry.substring(0, comma),
       model: entry.substring(comma + 1),
     };
+  }
+
+  /** Classify an incoming model name into a tier based on substring matching */
+  classifyModelTier(model: string): ModelTier {
+    const lower = model.toLowerCase();
+    for (const { tier, match } of MODEL_TIER_PATTERNS) {
+      if (lower.includes(match)) return tier;
+    }
+    return 'sonnet'; // default fallback
+  }
+
+  /** Resolve an incoming model name to the configured provider and model for its tier */
+  resolveModel(model: string): { provider: string; model: string } {
+    const tier = this.classifyModelTier(model);
+    const router = this.config.Router;
+    const entry = router[tier] || router.sonnet;
+    return this.parseRouterEntry(entry);
   }
 }
 

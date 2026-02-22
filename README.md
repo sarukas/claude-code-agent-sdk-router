@@ -16,7 +16,7 @@ This project is a security-focused rewrite inspired by [musistudio/claude-code-r
 
 - **Fully auditable** — ~2,000 lines of TypeScript. One developer can read the entire codebase in an afternoon.
 - **No dynamic code loading** — zero `require()` of external files, no `vm` module, no plugin hooks, no agent injection. All provider wiring uses static TypeScript imports.
-- **Minimal dependencies** — 5 runtime deps (fastify, @fastify/cors, pino, json5, jsonrepair). Every version pinned exactly. `package-lock.json` committed.
+- **Minimal dependencies** — 6 runtime deps (fastify, @fastify/cors, pino, pino-roll, json5, jsonrepair). Every version pinned exactly. `package-lock.json` committed.
 - **Localhost only** — binds to `127.0.0.1`, never `0.0.0.0`. No network exposure by default.
 - **No background daemon** — runs in the foreground. No PID files, no auto-start, no persistent process without explicit user action.
 - **No UI** — configuration is a single JSON file with comments.
@@ -132,10 +132,11 @@ Config lives at `~/.ccasr/config.json` (JSON5 — comments allowed).
     }
   ],
 
-  // Route Claude Code requests to providers
+  // Route Claude Code requests by model tier
   "Router": {
-    "default": "anthropic,claude-sonnet-4-20250514",
-    "background": "groq,llama-3.3-70b-versatile"
+    "opus":   "openrouter,google/gemini-2.5-pro-preview",
+    "sonnet": "anthropic,claude-sonnet-4-20250514",
+    "haiku":  "groq,llama-3.3-70b-versatile"
   }
 }
 ```
@@ -145,7 +146,22 @@ Config lives at `~/.ccasr/config.json` (JSON5 — comments allowed).
 - **`Providers[].name`** — must be exactly one of: `anthropic`, `openrouter`, `gemini`, `openai`, `groq`, `mistral`, `ollama`
 - **`api_key`** — literal string or `$ENV_VAR` reference (interpolated at startup, never logged)
 - **`Router.*`** — format: `"providerName,modelName"` (split on first comma)
-- **`Router.default`** — required. `Router.background` is optional (falls back to default)
+- **`Router.sonnet`** — required. `Router.opus` and `Router.haiku` are optional (fall back to sonnet)
+- Backward compat: `Router.default` is silently migrated to `Router.sonnet`
+
+### Model routing
+
+Claude Code sends Anthropic model names (e.g. `claude-sonnet-4-20250514`). The proxy classifies the incoming model into a tier and routes it to the configured provider and model for that tier:
+
+| Tier | Matches model names containing | Use case |
+|------|-------------------------------|----------|
+| `opus` | `opus` | Powerful tasks |
+| `sonnet` | `sonnet` (or unrecognized) | Primary workhorse, default fallback |
+| `haiku` | `haiku` | Fast/cheap tasks, subagents |
+
+If a tier is not configured, it falls back to `sonnet`. The proxy replaces **both** the provider and the model name — so if sonnet maps to `"openai,gpt-4.1"`, the request reaches OpenAI with `model: "gpt-4.1"`.
+
+Explicit `"provider,model"` prefix in requests (used by the test runner) bypasses tier routing entirely.
 
 ## CLI
 
@@ -154,6 +170,46 @@ ccasr start     # Start proxy server (foreground, Ctrl-C to stop)
 ccasr version   # Print version and Node version
 ccasr help      # Print usage instructions
 ```
+
+## Logging
+
+Logs are written to `~/.ccasr/logs/ccasr.log` with automatic rotation (default: rotate at 10MB, keep 5 files). Console output is always active.
+
+| Config key | Default | Description |
+|------------|---------|-------------|
+| `LOG` | `false` | Enable debug-level logging (request bodies to console) |
+| `LOG_FILE` | `true` | Write logs to `~/.ccasr/logs/ccasr.log` |
+| `LOG_MAX_SIZE` | `"10m"` | Rotate log file at this size |
+| `LOG_MAX_FILES` | `5` | Number of rotated files to keep |
+
+Set `"LOG_FILE": false` to disable file logging entirely.
+
+## Testing
+
+The test suite exercises every configured provider through the running proxy.
+
+```bash
+# Start the proxy first
+npm run dev
+
+# In a separate terminal, run all tests
+npm test
+
+# Run tests for a specific provider
+npx tsx tests/runner.ts http://127.0.0.1:3456 openai
+
+# Run a specific test across all providers
+npx tsx tests/runner.ts http://127.0.0.1:3456 "" basic_query
+```
+
+Tests are config-aware: only providers present in `~/.ccasr/config.json` are tested. Results are written to `~/.ccasr/logs/test-results.json`.
+
+### Test suites
+
+- **Provider tests** (5 tests per provider): basic_query, tool_use, streaming, invalid_model, web_search
+- **Agent SDK tests** (8 tests): basic format, streaming SSE, multi-turn tool calls, web search/fetch, subagent patterns, long tool list selection
+
+See [TESTING.md](TESTING.md) for the full testing guide — test descriptions, CLI usage, debugging tips, and how to add new tests.
 
 ## API endpoints
 

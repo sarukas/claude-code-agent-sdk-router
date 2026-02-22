@@ -11,6 +11,11 @@
   // Optional: route all outbound requests through an HTTP proxy
   // "PROXY_URL": "http://your-corporate-proxy:8080",
 
+  // File logging — writes to ~/.ccasr/logs/ccasr.log with rotation
+  // "LOG_FILE": true,        // default: true (set false to disable file logging)
+  // "LOG_MAX_SIZE": "10m",   // rotate at this size (default: 10m)
+  // "LOG_MAX_FILES": 5,      // keep this many rotated files (default: 5)
+
   "Providers": [
     {
       "name": "anthropic",
@@ -55,11 +60,14 @@
     }
   ],
 
-  // Route Claude Code requests to providers.
+  // Route Claude Code requests by model tier.
   // Format: "providerName,modelName" — split on first comma.
-  // "default" is required. "background" is optional (falls back to default).
+  // "sonnet" is required (also the fallback for opus/haiku if not specified).
+  // Claude Code sends model names like "claude-sonnet-4-20250514" — the proxy
+  // classifies them by tier (opus/sonnet/haiku) and routes accordingly.
   "Router": {
-    "default": "anthropic,claude-sonnet-4-20250514",
-    "background": "groq,llama-3.3-70b-versatile"
+    "opus":   "openrouter,google/gemini-2.5-pro-preview",
+    "sonnet": "anthropic,claude-sonnet-4-20250514",
+    "haiku":  "groq,llama-3.3-70b-versatile"
   }
 }
