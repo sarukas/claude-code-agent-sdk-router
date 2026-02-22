@@ -171,6 +171,22 @@ ccasr gateway --port 8901 --secret my-proxy-token
 
 When `--secret` is set, every request must include `x-api-key: my-proxy-token`. However, this means the `x-api-key` header is consumed for proxy auth and **cannot** also carry the provider key — use `X-Provider-Api-Key` header or the credential store instead. Passthrough mode is disabled.
 
+### Logging in gateway mode
+
+Gateway mode intentionally minimizes logging to protect multi-tenant credential and payload privacy:
+
+| Log type | Standard mode | Gateway mode | Why |
+|----------|--------------|--------------|-----|
+| Fastify request/response lines | Console + file | Console only | Basic HTTP status logging, no sensitive data |
+| 4-point payload capture (`claude_in`/`provider_out`/`provider_in`/`claude_out`) | When `LOG: true` | Disabled | Full request/response bodies would leak user credentials and content |
+| File logging (`~/.ccasr/logs/`) | On by default | Off by default | No disk writes of potentially sensitive multi-tenant data |
+
+- **Console logging** (`logToConsole`): On by default. Shows Fastify request/response status lines (method, URL, status code, latency). No request bodies or API keys.
+- **Payload capture**: Always disabled in gateway mode. The `CaptureLogger` is never created — all capture blocks in `router.ts` are skipped.
+- **File logging** (`logToFile`): Off by default. Can be enabled via `createGateway({ logToFile: true })` but this is not recommended for multi-tenant deployments.
+
+To silence all output: `createGateway({ logToConsole: false })`.
+
 ### Health endpoint
 
 ```bash
