@@ -32,7 +32,6 @@
   "author": "sarukas",
   "license": "MIT",
   "dependencies": {
-    "@fastify/cors": "11.0.1",
     "fastify": "5.7.4",
     "json5": "2.2.3",
     "jsonrepair": "3.12.0",

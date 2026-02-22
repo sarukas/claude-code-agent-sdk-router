@@ -2,7 +2,6 @@
 // Binds to 127.0.0.1 only.
 
 import Fastify, { type FastifyInstance } from 'fastify';
-import cors from '@fastify/cors';
 import pino from 'pino';
 import { mkdirSync } from 'fs';
 import { join } from 'path';
@@ -85,9 +84,6 @@ export async function createServer(configPath?: string, activeRoute?: string, op
 
   // Register error handler
   app.setErrorHandler(errorHandler);
-
-  // Register CORS
-  await app.register(cors);
 
   // Decorate with context
   app.decorate('serverContext', context);
