@@ -422,12 +422,22 @@ async function validateConfig(): Promise<void> {
   }
 }
 
+function cliPrefix(): string {
+  // If running via tsx (dev mode), suggest npx tsx; otherwise ccasr
+  const argv1 = process.argv[1] || '';
+  if (argv1.includes('tsx') || argv1.endsWith('cli.ts')) {
+    return 'npx tsx src/cli.ts';
+  }
+  return 'ccasr';
+}
+
 function printNextSteps(port: number): void {
+  const cmd = cliPrefix();
   console.log(`
   Next steps:
 
-    ccasr start          Start the proxy server
-    ccasr run claude     Start proxy + launch Claude Code
+    ${cmd} start          Start the proxy server
+    ${cmd} run claude     Start proxy + launch Claude Code
 
   Or set env vars manually:
 

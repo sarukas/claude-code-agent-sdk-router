@@ -6,10 +6,18 @@ import { CONFIG_FILE } from './core/services/config';
 
 const VERSION = '0.1.0';
 
+function cliPrefix(): string {
+  const argv1 = process.argv[1] || '';
+  if (argv1.includes('tsx') || argv1.endsWith('cli.ts')) {
+    return 'npx tsx src/cli.ts';
+  }
+  return 'ccasr';
+}
+
 function ensureConfig(): void {
   if (!existsSync(CONFIG_FILE)) {
     console.error(`Config not found: ${CONFIG_FILE}`);
-    console.error('Run "ccasr setup" to create it.');
+    console.error(`Run "${cliPrefix()} setup" to create it.`);
     process.exit(1);
   }
 }
@@ -51,21 +59,22 @@ switch (command) {
 
   case 'help':
   default:
+    { const cmd = cliPrefix();
     console.log(`
 ccasr v${VERSION} — Claude Code Agent SDK Router
 
-Usage: ccasr <command>
+Usage: ${cmd} <command>
 
 Commands:
-  setup     Interactive setup wizard — creates config file
+  setup     Interactive setup wizard — creates or edits config file
   start     Start the proxy server (foreground, Ctrl-C to stop)
-  run       Start proxy + launch command (e.g. ccasr run claude)
+  run       Start proxy + launch command (e.g. ${cmd} run claude)
   version   Print version info
   help      Show this help message
 
 Quick start:
-  ccasr setup            Configure providers and router
-  ccasr run claude       Start proxy and launch Claude Code
+  ${cmd} setup            Configure providers and router
+  ${cmd} run claude       Start proxy and launch Claude Code
 
 Config:
   ${CONFIG_FILE}
@@ -74,4 +83,5 @@ Manual setup:
   export ANTHROPIC_BASE_URL=http://127.0.0.1:3456
   export ANTHROPIC_API_KEY=ccasr-proxy
 `);
+    }
 }

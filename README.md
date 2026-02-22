@@ -14,55 +14,52 @@ A minimal, auditable API proxy that routes Claude Code and Agent SDK requests to
 ## Quick start
 
 ```bash
-# 1. Clone and install
+# 1. Clone, install, and make the ccasr command available
 git clone https://github.com/sarukas/claude-code-agent-sdk-router.git
 cd claude-code-agent-sdk-router
 npm install
+npm run build && npm link
 
 # 2. Run the interactive setup wizard
-npm run setup
+ccasr setup
 #    Walks you through: provider selection, API keys, router model tiers
 #    Writes config to ~/.ccasr/config.json
 
 # 3. Launch Claude Code through the proxy
-npx tsx src/cli.ts run claude
+ccasr run claude
 #    Starts the proxy on 127.0.0.1:3456, sets ANTHROPIC_BASE_URL and
 #    ANTHROPIC_API_KEY in claude's environment, shuts down when claude exits
 ```
 
 That's it. Claude Code now routes through your configured providers.
 
-### Alternative: manual setup
+### Alternative: run without installing
+
+If you don't want to install globally, use `npx tsx` to run from source directly:
+
+```bash
+git clone https://github.com/sarukas/claude-code-agent-sdk-router.git
+cd claude-code-agent-sdk-router
+npm install
+
+npx tsx src/cli.ts setup
+npx tsx src/cli.ts run claude
+```
+
+### Alternative: manual config
 
 If you prefer to configure by hand instead of using the wizard:
 
 ```bash
-# Copy the example config and edit it
 mkdir -p ~/.ccasr
 cp config.example.json ~/.ccasr/config.json
 # Edit ~/.ccasr/config.json — set your API keys and Router tiers
 
-# Start the proxy in a terminal
-npx tsx src/cli.ts start
-
-# In another terminal, point Claude Code at the proxy
+ccasr start
+# In another terminal, point Claude Code at the proxy:
 export ANTHROPIC_BASE_URL=http://127.0.0.1:3456
 export ANTHROPIC_API_KEY=ccasr-proxy
 claude
-```
-
-### Global install (optional)
-
-To use the `ccasr` command from anywhere:
-
-```bash
-npm run build
-npm install -g .
-
-# Now you can use:
-ccasr setup
-ccasr run claude
-ccasr start
 ```
 
 ## CLI
@@ -75,13 +72,15 @@ ccasr start
 | `ccasr version` | Print version and Node version |
 | `ccasr help` | Show usage instructions |
 
-During development, prefix with `npx tsx src/cli.ts` instead of `ccasr`:
+Without a global install, prefix with `npx tsx src/cli.ts` instead of `ccasr`:
 
 ```bash
 npx tsx src/cli.ts setup
 npx tsx src/cli.ts run claude
 npx tsx src/cli.ts start
 ```
+
+The CLI auto-detects how it was invoked and prints the correct command prefix in help and setup output.
 
 ### `ccasr setup`
 
