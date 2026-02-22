@@ -8,6 +8,9 @@
 // 5. Provider transformer.transformResponseOut converts response to unified format
 // 6. AnthropicTransformer.transformResponseIn converts back to Anthropic format
 // 7. Response is streamed back to Claude Code
+//
+// When LOG=true, 4-point JSONL capture is written per-provider:
+//   claude_in → provider_out → provider_in → claude_out
 
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { ProviderConfig, Transformer } from './core/types';
@@ -25,6 +28,8 @@ function maskHeaders(headers: Record<string, string>): Record<string, string> {
   }
   return masked;
 }
+
+let reqCounter = 0;
 
 export async function routeRequest(
   request: FastifyRequest,
@@ -54,6 +59,17 @@ export async function routeRequest(
 
   // Ensure stream flag is set
   if (body.stream === undefined) body.stream = false;
+
+  const capture = context.capture;
+  const reqId = `req-${++reqCounter}`;
+
+  // ── Capture point 1: claude_in — raw request from Claude Code ──
+  if (capture) {
+    capture.log(provider.name, 'claude_in', {
+      reqId, provider: provider.name, model: body.model,
+      stream: !!body.stream, body,
+    });
+  }
 
   let requestBody: any = body;
   let requestConfig: any = {};
@@ -107,52 +123,61 @@ export async function routeRequest(
     }
   }
 
-  // Data capture: log outgoing request
-  const logEnabled = context.config.get('LOG');
-  if (logEnabled) {
-    request.log.info({
-      type: 'outgoing_request',
-      url: url.toString(),
-      provider: provider.name,
-      model: body.model,
-      stream: !!body.stream,
-      headers: maskHeaders(headers),
-      body: requestBody,
+  // ── Capture point 2: provider_out — request sent to provider API ──
+  if (capture) {
+    capture.log(provider.name, 'provider_out', {
+      reqId, provider: provider.name, model: body.model,
+      stream: !!body.stream, url: url.toString(),
+      headers: maskHeaders(headers), body: requestBody,
     });
   }
 
   // Send request to provider
   const timeoutMs = context.config.get('API_TIMEOUT_MS');
-  const response = await fetch(url.toString(), {
+  let response = await fetch(url.toString(), {
     method: 'POST',
     headers,
     body: JSON.stringify(requestBody),
     signal: AbortSignal.timeout(timeoutMs),
   });
 
-  // Data capture: log provider response status
-  if (logEnabled) {
-    request.log.info({
-      type: 'provider_response',
-      provider: provider.name,
-      status: response.status,
-      statusText: response.statusText,
-      stream: !!body.stream,
-      contentType: response.headers.get('content-type'),
-    });
-  }
-
   if (!response.ok) {
     const errorText = await response.text();
     request.log.error(`Provider error (${provider.name}, ${body.model}): ${response.status} ${errorText}`);
-    if (logEnabled) {
-      request.log.info({ type: 'provider_error_body', provider: provider.name, body: errorText });
-    }
     throw createApiError(
       `Provider error (${provider.name}): ${response.status} ${errorText}`,
       response.status,
       'provider_error',
     );
+  }
+
+  // ── Capture point 3: provider_in — raw response from provider API ──
+  if (capture) {
+    if (body.stream && response.body) {
+      const [pipelineStream, _capturePromise] = capture.teeAndCapture(
+        response.body, provider.name, 'provider_in',
+        { reqId, provider: provider.name, model: body.model, status: response.status },
+      );
+      response = new Response(pipelineStream, {
+        status: response.status,
+        headers: response.headers,
+      });
+    } else {
+      const cloned = response.clone();
+      cloned.text().then(text => {
+        try {
+          capture.log(provider.name, 'provider_in', {
+            reqId, provider: provider.name, model: body.model,
+            status: response.status, body: JSON.parse(text),
+          });
+        } catch {
+          capture.log(provider.name, 'provider_in', {
+            reqId, provider: provider.name, model: body.model,
+            status: response.status, body: text,
+          });
+        }
+      }).catch(() => {});
+    }
   }
 
   // Process response through transformer chain (reverse order)
@@ -174,17 +199,27 @@ export async function routeRequest(
 
   // Send response back to Claude Code
   if (body.stream) {
-    if (logEnabled) {
-      request.log.info({ type: 'streaming_response', provider: provider.name, model: body.model });
-    }
     reply.header('Content-Type', 'text/event-stream');
     reply.header('Cache-Control', 'no-cache');
     reply.header('Connection', 'keep-alive');
+
+    // ── Capture point 4: claude_out — final streamed response to Claude Code ──
+    if (capture && finalResponse.body) {
+      const [pipelineStream, _capturePromise] = capture.teeAndCapture(
+        finalResponse.body, provider.name, 'claude_out',
+        { reqId, provider: provider.name, model: body.model },
+      );
+      return reply.send(pipelineStream);
+    }
     return reply.send(finalResponse.body);
   } else {
     const json = await finalResponse.json();
-    if (logEnabled) {
-      request.log.info({ type: 'final_response', provider: provider.name, model: body.model, body: json });
+
+    // ── Capture point 4: claude_out — final JSON response to Claude Code ──
+    if (capture) {
+      capture.log(provider.name, 'claude_out', {
+        reqId, provider: provider.name, model: body.model, body: json,
+      });
     }
     return reply.send(json);
   }

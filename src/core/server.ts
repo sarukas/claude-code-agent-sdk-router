@@ -11,6 +11,7 @@ import { ProviderService } from './services/provider';
 import { TransformerService } from './services/transformer';
 import { errorHandler } from './api/middleware';
 import { registerRoutes } from './api/routes';
+import { CaptureLogger } from './utils/capture';
 
 const LOGS_DIR = join(CONFIG_DIR, 'logs');
 
@@ -18,6 +19,7 @@ export interface ServerContext {
   config: ConfigService;
   providers: ProviderService;
   transformers: TransformerService;
+  capture?: CaptureLogger;
 }
 
 export async function createServer(configPath?: string): Promise<{ app: FastifyInstance; context: ServerContext }> {
@@ -30,6 +32,11 @@ export async function createServer(configPath?: string): Promise<{ app: FastifyI
   const transformers = new TransformerService();
 
   const context: ServerContext = { config, providers, transformers };
+
+  // Create capture logger for per-provider JSONL data capture
+  if (appConfig.LOG) {
+    context.capture = new CaptureLogger(LOGS_DIR);
+  }
 
   // Build logger config with optional file transport
   const logLevel = appConfig.LOG ? 'debug' : 'info';
@@ -74,16 +81,6 @@ export async function createServer(configPath?: string): Promise<{ app: FastifyI
 
   // Decorate with context
   app.decorate('serverContext', context);
-
-  // PreHandler: log request bodies when LOG is enabled
-  if (appConfig.LOG) {
-    app.addHook('preHandler', (request, _reply, done) => {
-      if (request.url.startsWith('/v1/messages') && request.body) {
-        request.log.info({ data: request.body, type: 'request body' });
-      }
-      done();
-    });
-  }
 
   // PreHandler: extract provider,model from request body
   app.addHook('preHandler', async (request, reply) => {
