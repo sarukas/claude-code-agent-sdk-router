@@ -16,26 +16,31 @@ export async function runCommand(args: string[], configPath?: string, activeRout
   const cmdArgs = args.slice(1);
 
   // 1. Start proxy server (quiet — no pino console logging)
+  // Use port 0 so the OS assigns a free port — allows parallel sessions
   const { app, context } = await createServer(configPath, activeRoute, { quiet: true });
-  const port = context.config.get('PORT');
 
   try {
-    await app.listen({ port, host: '127.0.0.1' });
+    await app.listen({ port: 0, host: '127.0.0.1' });
   } catch (err: any) {
     console.error(`Failed to start proxy: ${err.message}`);
     process.exit(1);
   }
 
+  // Get the actual port assigned by the OS
+  const addr = app.server.address();
+  const actualPort = typeof addr === 'object' && addr ? addr.port : context.config.get('PORT');
+
   printBanner(context);
+  console.log(`  Listening: http://127.0.0.1:${actualPort}`);
   console.log(`\nLaunching: ${cmd} ${cmdArgs.join(' ')}\n`);
 
-  // 2. Spawn child with env vars injected
+  // 2. Spawn child with env vars injected (using actual assigned port)
   const child = spawn(cmd, cmdArgs, {
     stdio: 'inherit',
     shell: process.platform === 'win32',
     env: {
       ...process.env,
-      ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${actualPort}`,
       ANTHROPIC_API_KEY: 'ccasr-proxy',
     },
   });
