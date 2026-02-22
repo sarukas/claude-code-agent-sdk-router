@@ -23,7 +23,7 @@ export interface ServerContext {
   capture?: CaptureLogger;
 }
 
-export async function createServer(configPath?: string, activeRoute?: string): Promise<{ app: FastifyInstance; context: ServerContext }> {
+export async function createServer(configPath?: string, activeRoute?: string, opts?: { quiet?: boolean }): Promise<{ app: FastifyInstance; context: ServerContext }> {
   // Load config
   const config = new ConfigService(configPath, activeRoute);
   const appConfig = config.getConfig();
@@ -40,8 +40,10 @@ export async function createServer(configPath?: string, activeRoute?: string): P
   }
 
   // Build logger config.
+  // In quiet mode (run command), skip console output to avoid polluting child process stdout.
   // Console output uses main-thread pino.destination (unbuffered).
   // File output uses pino-roll transport (worker thread, buffered — fine for files).
+  const quiet = opts?.quiet ?? false;
   const logLevel = appConfig.LOG ? 'debug' : 'info';
   const logToFile = appConfig.LOG_FILE !== false;
 
@@ -49,7 +51,6 @@ export async function createServer(configPath?: string, activeRoute?: string): P
 
   if (logToFile) {
     mkdirSync(LOGS_DIR, { recursive: true });
-    const consoleStream = pino.destination({ dest: 1, sync: true });
     const fileTransport = pino.transport({
       target: 'pino-roll',
       options: {
@@ -58,11 +59,20 @@ export async function createServer(configPath?: string, activeRoute?: string): P
         limit: { count: appConfig.LOG_MAX_FILES || 5 },
       },
     });
-    const multistream = pino.multistream([
-      { stream: consoleStream, level: logLevel as pino.Level },
-      { stream: fileTransport, level: 'info' as pino.Level },
-    ]);
-    logger = pino({ level: logLevel }, multistream);
+    if (quiet) {
+      // File only — no console output
+      logger = pino({ level: 'info' }, fileTransport);
+    } else {
+      const consoleStream = pino.destination({ dest: 1, sync: true });
+      const multistream = pino.multistream([
+        { stream: consoleStream, level: logLevel as pino.Level },
+        { stream: fileTransport, level: 'info' as pino.Level },
+      ]);
+      logger = pino({ level: logLevel }, multistream);
+    }
+  } else if (quiet) {
+    // No file, no console — silent logger
+    logger = pino({ level: 'silent' });
   } else {
     logger = pino({ level: logLevel });
   }

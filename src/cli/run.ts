@@ -1,7 +1,9 @@
 // Run wrapper — starts proxy, injects env vars, launches child process.
+// Runs in quiet mode: no pino console output during the session to avoid
+// polluting the child process stdout. Banner on startup, log path on exit.
 
 import { spawn } from 'child_process';
-import { createServer, printBanner } from '../core/server';
+import { createServer, printBanner, LOGS_DIR } from '../core/server';
 
 export async function runCommand(args: string[], configPath?: string, activeRoute?: string): Promise<void> {
   if (args.length === 0) {
@@ -13,8 +15,8 @@ export async function runCommand(args: string[], configPath?: string, activeRout
   const cmd = args[0];
   const cmdArgs = args.slice(1);
 
-  // 1. Start proxy server
-  const { app, context } = await createServer(configPath, activeRoute);
+  // 1. Start proxy server (quiet — no pino console logging)
+  const { app, context } = await createServer(configPath, activeRoute, { quiet: true });
   const port = context.config.get('PORT');
 
   try {
@@ -57,6 +59,7 @@ export async function runCommand(args: string[], configPath?: string, activeRout
 
   child.on('exit', (code, signal) => {
     const exitCode = code ?? (signal ? 128 : 1);
+    console.log(`\nSession logs: ${LOGS_DIR}`);
     app.close().then(() => process.exit(exitCode));
   });
 }
