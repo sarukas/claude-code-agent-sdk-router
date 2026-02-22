@@ -1,8 +1,27 @@
 // Tool arguments parser — uses jsonrepair (no vm module).
-// This is the security-patched version that replaces the original vm.runInContext fallback.
+// Attempts: standard JSON → JSON5 → jsonrepair → {} fallback.
 
-// TODO: Phase 2 — inline from llms with jsonrepair-only implementation
-export function parseToolArguments(raw: string): unknown {
-  // Placeholder
-  return JSON.parse(raw);
+import JSON5 from 'json5';
+import { jsonrepair } from 'jsonrepair';
+
+export function parseToolArguments(argsString: string): string {
+  if (!argsString || argsString.trim() === '' || argsString === '{}') {
+    return '{}';
+  }
+
+  try {
+    JSON.parse(argsString);
+    return argsString;
+  } catch {
+    try {
+      const args = JSON5.parse(argsString);
+      return JSON.stringify(args);
+    } catch {
+      try {
+        return jsonrepair(argsString);
+      } catch {
+        return '{}';
+      }
+    }
+  }
 }

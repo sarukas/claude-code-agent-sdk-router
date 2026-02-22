@@ -36,7 +36,7 @@ Both are **completely removed**. There are no lifecycle hooks, no tool injection
 ### No remote config or registry fetching
 
 The original fetches a provider registry from Cloudflare R2 CDN at startup and supports installing "presets" from GitHub. This project:
-- Loads config from **one local file only**: `~/.config/ccr-minimal/config.json`
+- Loads config from **one local file only**: `~/.ccasr/config.json`
 - Makes **zero network calls** at startup (only when forwarding user requests to providers)
 - Has no preset system, no CDN calls, no remote registry
 

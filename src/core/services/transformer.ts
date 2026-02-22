@@ -12,10 +12,10 @@ export class TransformerService {
   }
 
   getAll(): Transformer[] {
-    return Object.values(this.registry);
+    return Object.values(this.registry).filter(Boolean) as Transformer[];
   }
 
-  has(name: string): name is SupportedProvider {
-    return name in this.registry;
+  has(name: string): boolean {
+    return name in this.registry && this.registry[name as SupportedProvider] !== undefined;
   }
 }

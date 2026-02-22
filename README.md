@@ -58,8 +58,8 @@ cd claude-code-agent-sdk-router
 npm install
 
 # Copy and edit config
-mkdir -p ~/.config/ccr-minimal
-cp config.example.json ~/.config/ccr-minimal/config.json
+mkdir -p ~/.ccasr
+cp config.example.json ~/.ccasr/config.json
 # Edit config.json — add your API keys
 
 # Run in development
@@ -79,7 +79,7 @@ export ANTHROPIC_API_KEY=any-non-empty-string
 
 ## Configuration
 
-Config lives at `~/.config/ccr-minimal/config.json` (JSON5 — comments allowed).
+Config lives at `~/.ccasr/config.json` (JSON5 — comments allowed).
 
 ```json5
 {
@@ -150,9 +150,9 @@ Config lives at `~/.config/ccr-minimal/config.json` (JSON5 — comments allowed)
 ## CLI
 
 ```
-ccr-minimal start     # Start proxy server (foreground, Ctrl-C to stop)
-ccr-minimal version   # Print version and Node version
-ccr-minimal help      # Print usage instructions
+ccasr-minimal start     # Start proxy server (foreground, Ctrl-C to stop)
+ccasr-minimal version   # Print version and Node version
+ccasr-minimal help      # Print usage instructions
 ```
 
 ## API endpoints

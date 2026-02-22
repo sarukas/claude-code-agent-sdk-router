@@ -9,12 +9,12 @@ switch (command) {
     console.log('Starting server... (not yet implemented)');
     break;
   case 'version':
-    console.log('claude-code-agent-sdk-router v0.1.0');
+    console.log('ccasr v0.1.0');
     break;
   case 'help':
   default:
     console.log(`
-Usage: ccr-minimal <command>
+Usage: ccasr <command>
 
 Commands:
   start     Start the proxy server (foreground)

@@ -1,5 +1,6 @@
 // Core type definitions for claude-code-agent-sdk-router
 // UnifiedChatRequest/Response use OpenAI chat completions as the intermediate format.
+// No external SDK type imports — all types are self-contained.
 
 // ---------------------------------------------------------------------------
 // Provider names — the only 7 allowed values
@@ -43,22 +44,34 @@ export interface AppConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Content types
+// ---------------------------------------------------------------------------
+
+export interface TextContent {
+  type: 'text';
+  text: string;
+  cache_control?: { type?: string };
+}
+
+export interface ImageContent {
+  type: 'image_url';
+  image_url: { url: string };
+  media_type?: string;
+}
+
+export type MessageContent = TextContent | ImageContent;
+
+// ---------------------------------------------------------------------------
 // Unified (OpenAI-compatible) intermediate format
 // ---------------------------------------------------------------------------
 
 export interface UnifiedMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string | ContentBlock[];
+  content: string | null | MessageContent[];
   tool_calls?: ToolCall[];
   tool_call_id?: string;
-  name?: string;
-}
-
-export interface ContentBlock {
-  type: 'text' | 'image_url' | 'tool_use' | 'tool_result';
-  text?: string;
-  image_url?: { url: string };
-  [key: string]: unknown;
+  cache_control?: { type?: string };
+  thinking?: { content: string; signature?: string };
 }
 
 export interface ToolCall {
@@ -70,60 +83,63 @@ export interface ToolCall {
   };
 }
 
-export interface UnifiedChatRequest {
-  model: string;
-  messages: UnifiedMessage[];
-  stream?: boolean;
-  temperature?: number;
-  max_tokens?: number;
-  tools?: ToolDefinition[];
-  tool_choice?: unknown;
-  [key: string]: unknown;
-}
-
 export interface ToolDefinition {
   type: 'function';
   function: {
     name: string;
-    description?: string;
-    parameters?: Record<string, unknown>;
+    description: string;
+    parameters: Record<string, any>;
   };
 }
 
-export interface UnifiedChatResponse {
-  id: string;
-  object: string;
-  created: number;
+export type ThinkLevel = 'none' | 'low' | 'medium' | 'high';
+
+export interface UnifiedChatRequest {
+  messages: UnifiedMessage[];
   model: string;
-  choices: {
-    index: number;
-    message: UnifiedMessage;
-    finish_reason: string | null;
-  }[];
-  usage?: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
+  max_tokens?: number;
+  temperature?: number;
+  stream?: boolean;
+  tools?: ToolDefinition[];
+  tool_choice?: 'auto' | 'none' | 'required' | string | { type: 'function'; function: { name: string } };
+  reasoning?: {
+    effort?: ThinkLevel;
+    max_tokens?: number;
+    enabled?: boolean;
   };
+  [key: string]: unknown;
 }
 
 // ---------------------------------------------------------------------------
-// Transformer interface — every provider implements this
+// Transformer interface
 // ---------------------------------------------------------------------------
 
 export interface Transformer {
-  /** Convert incoming request from provider-native format to unified format */
-  transformRequestIn(request: unknown): UnifiedChatRequest;
+  name: string;
+  endPoint?: string;
 
-  /** Convert unified request to provider-native outbound format */
-  transformRequestOut(request: UnifiedChatRequest, config: ProviderConfig): unknown;
+  /** Anthropic request → unified request (inbound from Claude Code) */
+  transformRequestOut?(request: Record<string, any>): Promise<UnifiedChatRequest>;
 
-  /** Convert provider response/stream to unified format */
-  transformResponseIn(response: unknown): unknown;
+  /** Unified request → provider-native request (outbound to provider API) */
+  transformRequestIn?(request: UnifiedChatRequest, provider: ProviderConfig): Promise<Record<string, any>>;
 
-  /** Convert unified response back to Anthropic format for Claude Code */
-  transformResponseOut(response: unknown): unknown;
+  /** Provider response → unified/OpenAI response (inbound from provider API) */
+  transformResponseOut?(response: Response, logger?: any): Promise<Response>;
 
-  /** The Fastify route path this transformer handles (e.g., "/v1/messages") */
-  endPoint(): string;
+  /** Unified/OpenAI response → Anthropic response (outbound to Claude Code) */
+  transformResponseIn?(response: Response): Promise<Response>;
+
+  /** Auth header setup */
+  auth?(request: any, provider: ProviderConfig): Promise<{ body: any; config: { headers: Record<string, string | undefined> } }>;
+}
+
+// ---------------------------------------------------------------------------
+// API error
+// ---------------------------------------------------------------------------
+
+export interface ApiError extends Error {
+  statusCode?: number;
+  code?: string;
+  type?: string;
 }

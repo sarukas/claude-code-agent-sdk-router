@@ -1,4 +1,4 @@
-// ConfigService — loads config from ~/.config/ccr-minimal/config.json
+// ConfigService — loads config from ~/.ccasr/config.json
 // Interpolates $ENV_VAR references. Validates provider names. Fails hard on invalid config.
 
 import type { AppConfig } from '../types';
