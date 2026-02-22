@@ -22,7 +22,7 @@ npm run build && npm link
 
 # 2. Run the interactive setup wizard
 ccasr setup
-#    Walks you through: provider selection, API keys, router model tiers
+#    Walks you through: provider selection, API keys, named route sets
 #    Writes config to ~/.ccasr/config.json
 
 # 3. Launch Claude Code through the proxy
@@ -53,7 +53,7 @@ If you prefer to configure by hand instead of using the wizard:
 ```bash
 mkdir -p ~/.ccasr
 cp config.example.json ~/.ccasr/config.json
-# Edit ~/.ccasr/config.json — set your API keys and Router tiers
+# Edit ~/.ccasr/config.json — set your API keys and route sets
 
 ccasr start
 # In another terminal, point Claude Code at the proxy:
@@ -72,37 +72,46 @@ claude
 | `ccasr version` | Print version and Node version |
 | `ccasr help` | Show usage instructions |
 
-Without a global install, prefix with `npx tsx src/cli.ts` instead of `ccasr`:
+All commands accept `--config <path>` to use an alternative config file and `--route <name>` to override the active route set:
 
 ```bash
-npx tsx src/cli.ts setup
-npx tsx src/cli.ts run claude
-npx tsx src/cli.ts start
+ccasr start --route mixed           # use "mixed" route set
+ccasr run --route cheap claude      # proxy with "cheap" routes
+ccasr start --config ./test.json    # alternative config file
 ```
 
-The CLI auto-detects how it was invoked and prints the correct command prefix in help and setup output.
+Without a global install, prefix with `npx tsx src/cli.ts` instead of `ccasr`.
 
 ### `ccasr setup`
 
-Interactive, menu-driven configuration editor. On first run it walks you through provider selection, API keys, model routing, and port sequentially. On subsequent runs it loads your existing config and drops you into the main menu:
+Interactive, menu-driven configuration editor. On first run it walks you through provider selection, API keys, a named route set, and port sequentially. On subsequent runs it loads your existing config and drops you into the main menu:
 
 ```
   Current configuration:
 
-    Providers:  Anthropic ($ANTHROPIC_API_KEY), Gemini ($GEMINI_API_KEY)
-    Sonnet:     anthropic / claude-sonnet-4-20250514
-    Opus:       (not configured)
-    Haiku:      gemini / gemini-2.5-flash
-    Port:       3456
+    Providers:    Anthropic ($ANTHROPIC_API_KEY), Gemini ($GEMINI_API_KEY)
+    Active route: direct
+    Port:         3456
+    Logging:      OFF
+    Route "direct" *:
+      sonnet: anthropic / claude-sonnet-4-20250514
+      haiku:  gemini / gemini-2.5-flash
 
   Setup menu:
   > Edit providers
     Edit API keys
-    Edit model routing
+    Edit route sets
     Edit port
+    Toggle detailed logging
     Save and exit
     Exit without saving
 ```
+
+**Edit route sets** opens a sub-menu where you can:
+- Edit an existing route set's tier assignments
+- Add a new named route set
+- Remove a route set (cannot remove the active one)
+- Set which route set is active by default
 
 All changes are held in memory until you choose **Save and exit** — nothing is written until then. API keys are masked in the summary (`$ENV_VAR` shown as-is, raw keys as `sk...7x2f`).
 
@@ -114,8 +123,8 @@ Starts the proxy server, injects `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` in
 
 ```bash
 ccasr run claude                    # launch Claude Code
+ccasr run --route mixed claude      # launch with a different route set
 ccasr run claude --model opus       # launch with flags
-ccasr run echo hello                # any command works
 ```
 
 ## Configuration
@@ -124,71 +133,68 @@ Config lives at `~/.ccasr/config.json` (JSON5 — comments allowed). Created aut
 
 ```json5
 {
-  // Emit request/response bodies to stdout (keep false in production)
   "LOG": false,
   "API_TIMEOUT_MS": 300000,
   "PORT": 3456,
 
-  "Providers": [
-    {
-      "name": "anthropic",
-      "api_base_url": "https://api.anthropic.com",
-      "api_key": "$ANTHROPIC_API_KEY"
-    },
-    {
-      "name": "openrouter",
-      "api_base_url": "https://openrouter.ai/api/v1/chat/completions",
-      "api_key": "$OPENROUTER_API_KEY",
-      "models": ["google/gemini-2.5-pro-preview", "anthropic/claude-sonnet-4"]
-    },
-    {
-      "name": "gemini",
-      "api_base_url": "https://generativelanguage.googleapis.com/v1beta/models/",
-      "api_key": "$GEMINI_API_KEY",
-      "models": ["gemini-2.5-flash", "gemini-2.5-pro"]
-    },
-    {
-      "name": "openai",
-      "api_base_url": "https://api.openai.com/v1/chat/completions",
-      "api_key": "$OPENAI_API_KEY",
-      "models": ["gpt-4o", "gpt-4.1"]
-    },
-    {
-      "name": "groq",
-      "api_base_url": "https://api.groq.com/openai/v1/chat/completions",
-      "api_key": "$GROQ_API_KEY",
-      "models": ["llama-3.3-70b-versatile"]
-    },
-    {
-      "name": "mistral",
-      "api_base_url": "https://api.mistral.ai/v1/chat/completions",
-      "api_key": "$MISTRAL_API_KEY",
-      "models": ["codestral-latest", "mistral-large-latest"]
-    },
-    {
-      "name": "ollama",
-      "api_base_url": "http://localhost:11434/v1/chat/completions",
-      "api_key": "ollama",
-      "models": ["qwen2.5-coder:latest"]
-    }
-  ],
+  // Providers — just credentials. Base URLs are built-in defaults.
+  // Use "$ENV_VAR" to reference environment variables.
+  "Providers": {
+    "anthropic": "$ANTHROPIC_API_KEY",
+    "openrouter": "$OPENROUTER_API_KEY",
+    "gemini": "$GEMINI_API_KEY"
+  },
 
-  // Route Claude Code requests by model tier
-  "Router": {
-    "opus":   "openrouter,google/gemini-2.5-pro-preview",
-    "sonnet": "anthropic,claude-sonnet-4-20250514",
-    "haiku":  "groq,llama-3.3-70b-versatile"
-  }
+  // Named route sets — different model mixes for different scenarios.
+  // Each tier: "providerName,modelName" (split on first comma).
+  "Routes": {
+    "direct": {
+      "opus":   "anthropic,claude-opus-4-20250514",
+      "sonnet": "anthropic,claude-sonnet-4-20250514",
+      "haiku":  "anthropic,claude-haiku-4-5-20241022"
+    },
+    "mixed": {
+      "sonnet": "openrouter,google/gemini-2.5-pro-preview",
+      "haiku":  "gemini,gemini-2.5-flash"
+    },
+    "cheap": {
+      "sonnet": "gemini,gemini-2.5-flash",
+      "haiku":  "gemini,gemini-2.5-flash"
+    }
+  },
+
+  // Which route set to use by default. Override with --route flag.
+  "ActiveRoute": "direct"
 }
 ```
 
 ### Config rules
 
-- **`Providers[].name`** — must be exactly one of: `anthropic`, `openrouter`, `gemini`, `openai`, `groq`, `mistral`, `ollama`
+- **`Providers`** — object mapping provider name to API key. Provider names must be one of: `anthropic`, `openrouter`, `gemini`, `openai`, `groq`, `mistral`, `ollama`. Base URLs are built-in defaults (no need to specify them).
 - **`api_key`** — literal string or `$ENV_VAR` reference (interpolated at startup, never logged)
-- **`Router.*`** — format: `"providerName,modelName"` (split on first comma)
-- **`Router.sonnet`** — required. `Router.opus` and `Router.haiku` are optional (fall back to sonnet)
-- Backward compat: `Router.default` is silently migrated to `Router.sonnet`
+- **`Routes`** — object of named route sets. Each route set has `sonnet` (required), and optionally `opus` and `haiku`. Values are `"providerName,modelName"` format (split on first comma).
+- **`ActiveRoute`** — which route set to use at runtime. Can be overridden with `--route <name>`.
+- **Backward compat** — old config format with `Providers` array and single `Router` object is auto-detected and works without changes.
+
+### Named route sets
+
+Route sets let you define different model mixes and switch between them without editing config:
+
+| Route set | Use case | Example |
+|-----------|----------|---------|
+| `direct` | Full Anthropic, maximum quality | All tiers use Anthropic models |
+| `mixed` | Balance cost and quality | Sonnet via OpenRouter, Haiku via Gemini |
+| `cheap` | Minimize cost for development | Everything through Gemini Flash |
+
+Switch at runtime with `--route`:
+
+```bash
+ccasr start --route cheap           # develop cheaply
+ccasr run --route direct claude     # switch to full Anthropic for important work
+npm test -- --route mixed           # test the "mixed" route set
+```
+
+The `ActiveRoute` field in config sets the default when `--route` is not specified.
 
 ### Model routing
 
@@ -233,28 +239,28 @@ Set `"LOG_FILE": false` to disable file logging entirely.
 
 ## Testing
 
-The test suite exercises every configured provider through the running proxy.
+The test suite exercises providers through the running proxy. Tests derive their targets from the active route set — only providers and models referenced in the active route are tested.
 
 ```bash
 # Start the proxy first
 npm run dev
 
-# In a separate terminal, run all tests
+# In a separate terminal, run all tests (uses ActiveRoute from config)
 npm test
 
-# Run tests for a specific provider
-npx tsx tests/runner.ts http://127.0.0.1:3456 openai
+# Test a specific route set
+npm test -- --route mixed
 
-# Run a specific test across all providers
-npx tsx tests/runner.ts http://127.0.0.1:3456 "" basic_query
+# Run a specific test
+npm test -- --route direct streaming
 ```
 
-Tests are config-aware: only providers present in `~/.ccasr/config.json` are tested. Results are written to `~/.ccasr/logs/test-results.json`.
+Tests are config-aware: the runner reads your config, resolves the active route set, and runs provider tests per unique provider and SDK tests per tier. Results are written to `~/.ccasr/logs/test-results.json`.
 
 ### Test suites
 
-- **Provider tests** (5 tests per provider): basic_query, tool_use, streaming, invalid_model, web_search
-- **Agent SDK tests** (8 tests): basic format, streaming SSE, multi-turn tool calls, web search/fetch, subagent patterns, long tool list selection
+- **Provider tests** (5 tests per unique provider in the route): basic_query, tool_use, streaming, invalid_model, web_search
+- **Agent SDK tests** (8 tests per tier in the route): basic format, streaming SSE, multi-turn tool calls, web search/fetch, subagent patterns, long tool list selection
 
 See [TESTING.md](TESTING.md) for the full testing guide — test descriptions, CLI usage, debugging tips, and how to add new tests.
 
@@ -263,7 +269,7 @@ See [TESTING.md](TESTING.md) for the full testing guide — test descriptions, C
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/v1/messages` | Main routing endpoint — accepts Anthropic format, routes to configured provider |
-| `GET` | `/health` | Health check — returns status, version, configured providers |
+| `GET` | `/health` | Health check — returns status, version, providers, active route |
 
 That's it. Two endpoints. Nothing else.
 

@@ -6,28 +6,60 @@ End-to-end test suite for ccasr. Tests exercise the real proxy against real prov
 
 1. **Node.js 18.20+** installed
 2. **Dependencies installed**: `npm install`
-3. **Config file** at `~/.ccasr/config.json` with at least one provider configured and API keys set
+3. **Config file** at `~/.ccasr/config.json` with at least one provider and route set configured
 4. **Proxy running** in a separate terminal
 
 ## Quick start
 
 ```bash
-CD to project directory. 
-
 # Terminal 1: start the proxy
 npm run dev
 
-# Terminal 2: run all tests
+# Terminal 2: run all tests (uses ActiveRoute from config)
 npm test
 ```
 
-That's it. The runner reads your config, skips unconfigured providers, and prints a pass/fail summary.
+That's it. The runner reads your config, resolves the active route set, and tests the providers and models in that route.
+
+## How test targets are derived
+
+Tests are driven by the **active route set**, not by iterating all providers. This means you test exactly what you'll use at runtime.
+
+Given this config:
+
+```json
+{
+  "Providers": {
+    "anthropic": "$ANTHROPIC_API_KEY",
+    "gemini": "$GEMINI_API_KEY"
+  },
+  "Routes": {
+    "direct": {
+      "sonnet": "anthropic,claude-sonnet-4-20250514",
+      "haiku":  "anthropic,claude-haiku-4-5-20241022"
+    },
+    "cheap": {
+      "sonnet": "gemini,gemini-2.5-flash",
+      "haiku":  "gemini,gemini-2.5-flash"
+    }
+  },
+  "ActiveRoute": "direct"
+}
+```
+
+Running `npm test` tests the **"direct"** route set:
+- **Provider tests**: 5 tests for `anthropic` (the only unique provider in "direct")
+- **SDK tests**: 8 tests for `sonnet` tier (anthropic/claude-sonnet-4) + 8 tests for `haiku` tier (anthropic/claude-haiku-4-5)
+
+Running `npm test -- --route cheap` tests the **"cheap"** route set:
+- **Provider tests**: 5 tests for `gemini` (the only unique provider in "cheap")
+- **SDK tests**: 8 tests for `sonnet` tier (gemini/gemini-2.5-flash) + 8 tests for `haiku` tier (gemini/gemini-2.5-flash)
 
 ## What gets tested
 
-### Provider tests (per provider, 5 tests each)
+### Provider tests (per unique provider in the route, 5 tests each)
 
-Every configured provider runs through these tests:
+Every unique provider in the active route set runs through these tests:
 
 | Test            | What it does                                        | Pass criteria                                                             |
 | --------------- | --------------------------------------------------- | ------------------------------------------------------------------------- |
@@ -37,9 +69,9 @@ Every configured provider runs through these tests:
 | `invalid_model` | Sends request with `nonexistent-model-xyz-99`       | Proxy returns HTTP 4xx/5xx with error info (no crash)                     |
 | `web_search`    | 2-turn tool round-trip: model calls `web_search` tool, test returns simulated results, model summarizes | Response references search result content. EXPECTED\_FAIL on Ollama (no tool calling). |
 
-### Agent SDK tests (8 tests)
+### Agent SDK tests (per tier in the route, 8 tests each)
 
-These run against the default Router target and simulate what Claude Code actually sends:
+These run for each tier (sonnet, opus, haiku) in the active route set and simulate what Claude Code actually sends:
 
 | Test                       | What it does                                                                                   | Pass criteria                                                                                                                                                |
 | -------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -54,37 +86,25 @@ These run against the default Router target and simulate what Claude Code actual
 
 ## Running tests
 
-### Full suite
+### Full suite (active route set)
 
 ```bash
 npm test
 ```
 
-### Single provider
+### Specific route set
 
 ```bash
-npx tsx tests/runner.ts http://127.0.0.1:3456 anthropic
-npx tsx tests/runner.ts http://127.0.0.1:3456 openai
-npx tsx tests/runner.ts http://127.0.0.1:3456 ollama
+npm test -- --route mixed
+npm test -- --route cheap
+npm test -- --route direct
 ```
 
-### Agent SDK suite only
+### Specific test name
 
 ```bash
-npx tsx tests/runner.ts http://127.0.0.1:3456 agent-sdk
-```
-
-### Single test across all providers
-
-```bash
-npx tsx tests/runner.ts http://127.0.0.1:3456 "" basic_query
-npx tsx tests/runner.ts http://127.0.0.1:3456 "" streaming
-```
-
-### Single provider, single test
-
-```bash
-npx tsx tests/runner.ts http://127.0.0.1:3456 openai tool_use
+npm test -- --route direct streaming
+npm test -- basic_query
 ```
 
 ### Custom port or URL
@@ -93,17 +113,24 @@ npx tsx tests/runner.ts http://127.0.0.1:3456 openai tool_use
 npx tsx tests/runner.ts http://127.0.0.1:9999
 ```
 
+### Alternative config
+
+```bash
+npx tsx tests/runner.ts --config ./test-config.json http://127.0.0.1:3456
+```
+
 ## CLI arguments
 
 ```
-npx tsx tests/runner.ts [baseUrl] [provider] [testName]
+npx tsx tests/runner.ts [--config <path>] [--route <name>] [baseUrl] [testName]
 ```
 
-| Arg        | Default                 | Description                                                      |
-| ---------- | ----------------------- | ---------------------------------------------------------------- |
-| `baseUrl`  | `http://127.0.0.1:3456` | Proxy URL                                                        |
-| `provider` | (all configured)        | Run only this provider's tests, or `agent-sdk` for the SDK suite |
-| `testName` | (all)                   | Run only tests matching this name                                |
+| Arg          | Default                 | Description                                                 |
+| ------------ | ----------------------- | ----------------------------------------------------------- |
+| `--config`   | `~/.ccasr/config.json`  | Config file to read for route/provider discovery            |
+| `--route`    | `ActiveRoute` in config | Which named route set to test                               |
+| `baseUrl`    | `http://127.0.0.1:3456` | Proxy URL                                                   |
+| `testName`   | (all)                   | Run only tests matching this name                           |
 
 ## Understanding the output
 
@@ -112,8 +139,13 @@ npx tsx tests/runner.ts [baseUrl] [provider] [testName]
   ccasr test runner
 ========================================
   Target:     http://127.0.0.1:3456
-  Providers:  anthropic, openrouter, gemini, openai, groq
-  Server:     v0.1.0 (anthropic, openrouter, gemini, openai, groq)
+  Config:     /home/user/.ccasr/config.json
+  Route:      direct
+    sonnet: anthropic / claude-sonnet-4-20250514
+    opus:   anthropic / claude-opus-4-20250514
+    haiku:  anthropic / claude-haiku-4-5-20241022
+  Providers:  anthropic
+  Server:     v0.1.0 (anthropic, gemini, openrouter)
 
 --- anthropic (claude-sonnet-4-20250514) ---
   PASS  basic_query (1823ms)
@@ -122,28 +154,25 @@ npx tsx tests/runner.ts [baseUrl] [provider] [testName]
   PASS  invalid_model (342ms)
   PASS  web_search (3201ms)
 
---- openai (gpt-4o) ---
-  PASS  basic_query (1102ms)
-  PASS  tool_use (1534ms)
-  PASS  streaming (987ms)
-  PASS  invalid_model (215ms)
-  PASS  web_search (3456ms)
-
---- agent-sdk (anthropic/claude-sonnet-4-20250514) ---
+--- agent-sdk:sonnet (anthropic/claude-sonnet-4-20250514) ---
   PASS  basic_anthropic_format (1654ms)
   PASS  streaming_sse_parsing (1203ms)
   PASS  multi_turn_tool_call (4521ms)
-  PASS  web_search_tool (2987ms)
-  PASS  web_fetch_tool (1876ms)
-  PASS  single_subagent_call (1432ms)
-  PASS  parallel_subagent_calls (2156ms)
-  PASS  long_tool_list_with_call (1789ms)
+  ...
+
+--- agent-sdk:opus (anthropic/claude-opus-4-20250514) ---
+  PASS  basic_anthropic_format (2104ms)
+  ...
+
+--- agent-sdk:haiku (anthropic/claude-haiku-4-5-20241022) ---
+  PASS  basic_anthropic_format (876ms)
+  ...
 
 ========================================
   SUMMARY
 ========================================
-  18 passed, 0 failed, 0 expected-fail, 18 total
-  Time: 28.4s
+  29 passed, 0 failed, 0 expected-fail, 29 total
+  Time: 42.1s
 ========================================
 ```
 
@@ -153,7 +182,7 @@ npx tsx tests/runner.ts [baseUrl] [provider] [testName]
 | ------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `PASS`  | Test passed                                                                                                                    |
 | `FAIL`  | Test failed unexpectedly — a real problem                                                                                      |
-| `XFAIL` | Test failed, but this was expected for this provider (e.g., web\_search on OpenAI). Not counted as a failure in the exit code. |
+| `XFAIL` | Test failed, but this was expected for this provider (e.g., web\_search on Ollama). Not counted as a failure in the exit code. |
 | `SKIP`  | Provider not in config — entire suite skipped                                                                                  |
 
 ## Results file
@@ -170,8 +199,10 @@ Format:
 {
   "timestamp": "2026-02-22T14:30:00.000Z",
   "baseUrl": "http://127.0.0.1:3456",
-  "durationSeconds": 28.4,
-  "summary": { "passed": 17, "failed": 0, "expectedFail": 1, "total": 18 },
+  "configPath": "/home/user/.ccasr/config.json",
+  "route": "direct",
+  "durationSeconds": 42.1,
+  "summary": { "passed": 29, "failed": 0, "expectedFail": 0, "total": 29 },
   "results": [
     {
       "provider": "anthropic",
@@ -192,12 +223,11 @@ Format:
 
 ### OpenRouter
 
-* Uses the first model in your `models` array. Claude models via OpenRouter support most features.
+* Model used comes from the active route set tier that references openrouter.
 
 ### Gemini
 
-* Tool call format is translated by the Gemini transformer (custom JSON schema → Gemini format).
-
+* Tool call format is translated by the Gemini transformer (custom JSON schema -> Gemini format).
 * `web_search` test handles both Gemini's native `googleSearch` path and standard tool\_use path.
 
 ### OpenAI
@@ -206,7 +236,7 @@ Format:
 
 ### Groq
 
-* Fast inference. Some models may not support tool calling well — if `tool_use` fails, try a different model in your config.
+* Fast inference. Some models may not support tool calling well — if `tool_use` fails, try a different model in your route set.
 
 ### Mistral
 
@@ -215,9 +245,7 @@ Format:
 ### Ollama
 
 * Requires Ollama running locally with the configured model pulled (`ollama pull qwen2.5-coder:latest`).
-
 * `tool_use` and `web_search` are EXPECTED\_FAIL for most local models (many don't support function calling).
-
 * If Ollama is not running, the test runner will report connection errors (not EXPECTED\_FAIL).
 
 ## Debugging failures
@@ -228,7 +256,7 @@ Format:
 4. **Run a single failing test** to isolate:
 
    ```bash
-   npx tsx tests/runner.ts http://127.0.0.1:3456 openai tool_use
+   npm test -- --route direct streaming
    ```
 5. **Test the provider directly** with curl to rule out proxy issues:
 
@@ -271,15 +299,10 @@ Each test is:
 Helpers available from `tests/harness.ts`:
 
 * `sendMessage(ctx, body)` — non-streaming request, returns parsed JSON
-
 * `sendStreamMessage(ctx, body)` — streaming request, returns `SSEEvent[]`
-
 * `sendMessageExpectError(ctx, body)` — expects non-2xx, returns `{ status, body }`
-
 * `makeToolDef(name, desc, props, required?)` — builds Anthropic tool definition
-
 * `fetchUrl(url, maxLength?)` — fetches a URL via HTTP GET, returns text (used for web\_fetch round-trips)
-
 * `assert(condition, msg)` / `assertDefined(val, label)` / `assertType(val, type, label)`
 
 Agent SDK tests go in `tests/agent-sdk.ts` with the same pattern.
