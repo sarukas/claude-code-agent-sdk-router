@@ -1,0 +1,37 @@
+{
+  "anthropic": [
+    "claude-sonnet-4-20250514",
+    "claude-opus-4-20250514",
+    "claude-haiku-4-5-20241022"
+  ],
+  "openrouter": [
+    "anthropic/claude-sonnet-4",
+    "google/gemini-2.5-pro-preview",
+    "google/gemini-2.5-flash",
+    "anthropic/claude-opus-4",
+    "meta-llama/llama-3.3-70b-instruct"
+  ],
+  "gemini": [
+    "gemini-2.5-flash",
+    "gemini-2.5-pro"
+  ],
+  "openai": [
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4o",
+    "o3-mini"
+  ],
+  "groq": [
+    "llama-3.3-70b-versatile",
+    "moonshotai/kimi-k2-instruct"
+  ],
+  "mistral": [
+    "codestral-latest",
+    "mistral-large-latest"
+  ],
+  "ollama": [
+    "qwen2.5-coder:latest",
+    "llama3.1:latest",
+    "deepseek-coder-v2:latest"
+  ]
+}

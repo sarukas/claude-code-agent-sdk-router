@@ -57,24 +57,23 @@ git clone https://github.com/sarukas/claude-code-agent-sdk-router.git
 cd claude-code-agent-sdk-router
 npm install
 
-# Copy and edit config
+# Interactive setup — select providers, API keys, router models
+npx tsx src/cli.ts setup
+
+# Start proxy + launch Claude Code in one command
+npx tsx src/cli.ts run claude
+```
+
+Or set up manually:
+
+```bash
 mkdir -p ~/.ccasr
 cp config.example.json ~/.ccasr/config.json
 # Edit config.json — add your API keys
 
-# Run in development
-npm run dev
-
-# Or build and run
-npm run build
-npm start
-```
-
-Then point Claude Code at the proxy:
-
-```bash
 export ANTHROPIC_BASE_URL=http://127.0.0.1:3456
-export ANTHROPIC_API_KEY=any-non-empty-string
+export ANTHROPIC_API_KEY=ccasr-proxy
+npx tsx src/cli.ts start
 ```
 
 ## Configuration
@@ -166,10 +165,20 @@ Explicit `"provider,model"` prefix in requests (used by the test runner) bypasse
 ## CLI
 
 ```
-ccasr start     # Start proxy server (foreground, Ctrl-C to stop)
-ccasr version   # Print version and Node version
-ccasr help      # Print usage instructions
+ccasr setup              # Interactive setup wizard — creates config
+ccasr start              # Start proxy server (foreground, Ctrl-C to stop)
+ccasr run <command>      # Start proxy + launch command (e.g. ccasr run claude)
+ccasr version            # Print version and Node version
+ccasr help               # Print usage instructions
 ```
+
+### `ccasr setup`
+
+Interactive wizard that walks you through provider selection, API key configuration, and router model assignment. Creates `~/.ccasr/config.json`. Model choices come from `known_models.json` at the project root — edit that file to customize available models.
+
+### `ccasr run`
+
+Starts the proxy server, sets `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` in the child's environment, then launches the given command. When the child exits, the proxy shuts down automatically.
 
 ## Logging
 
