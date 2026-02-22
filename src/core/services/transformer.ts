@@ -18,4 +18,8 @@ export class TransformerService {
   has(name: string): boolean {
     return name in this.registry && this.registry[name as SupportedProvider] !== undefined;
   }
+
+  getNames(): string[] {
+    return Object.keys(this.registry);
+  }
 }

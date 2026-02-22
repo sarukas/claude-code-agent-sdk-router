@@ -150,3 +150,26 @@ export interface ApiError extends Error {
   code?: string;
   type?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Gateway mode
+// ---------------------------------------------------------------------------
+
+export interface GatewayOptions {
+  port?: number;              // default: 0 (OS-assigned ephemeral port)
+  host?: string;              // default: '127.0.0.1'
+  logToFile?: boolean;        // default: false in gateway mode
+  logToConsole?: boolean;     // default: true
+  timeoutMs?: number;         // default: 300_000
+  proxySecret?: string;       // if set, x-api-key must match (mutually exclusive with passthrough)
+  proxyUrl?: string;          // HTTP proxy for outbound requests
+  providers?: Partial<Record<SupportedProvider, string>>;    // pre-configured API keys
+  providerUrls?: Partial<Record<SupportedProvider, string>>; // override default base URLs
+}
+
+export interface StoredCredential {
+  provider: SupportedProvider;
+  api_key: string;
+  expiresAt: number;
+  timer: ReturnType<typeof setTimeout>;
+}

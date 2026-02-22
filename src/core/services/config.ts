@@ -7,11 +7,11 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import JSON5 from 'json5';
-import type { AppConfig, ModelTier, ProviderConfig, RouterConfig, SupportedProvider } from '../types';
+import type { AppConfig, GatewayOptions, ModelTier, ProviderConfig, RouterConfig, SupportedProvider } from '../types';
 import { SUPPORTED_PROVIDERS } from '../types';
 
-// Provider base URLs — duplicated from cli/constants to avoid circular dep
-const PROVIDER_BASE_URLS: Record<SupportedProvider, string> = {
+// Provider base URLs — exported for gateway mode and cli/constants
+export const PROVIDER_BASE_URLS: Record<SupportedProvider, string> = {
   anthropic: 'https://api.anthropic.com',
   openrouter: 'https://openrouter.ai/api/v1/chat/completions',
   gemini: 'https://generativelanguage.googleapis.com/v1beta/models/',
@@ -36,13 +36,65 @@ const DEFAULT_CONFIG: Partial<AppConfig> = {
   PORT: 3456,
 };
 
+/** Interpolate $ENV_VAR references in config values */
+function interpolateEnvVar(value: string): string {
+  if (value.startsWith('$')) {
+    const envName = value.substring(1);
+    const envValue = process.env[envName];
+    if (!envValue) {
+      throw new Error(`Environment variable ${envName} is not set (referenced in config api_key)`);
+    }
+    return envValue;
+  }
+  return value;
+}
+
 export class ConfigService {
   private config: AppConfig;
   readonly configPath: string;
+  readonly mode: 'standard' | 'gateway';
 
-  constructor(configPath?: string, activeRouteOverride?: string) {
-    this.configPath = configPath || CONFIG_FILE;
-    this.config = this.loadAndValidate(this.configPath, activeRouteOverride);
+  constructor(configPath?: string, activeRouteOverride?: string);
+  constructor(prebuilt: AppConfig, mode: 'gateway');
+  constructor(configPathOrPrebuilt?: string | AppConfig, activeRouteOrMode?: string) {
+    if (typeof configPathOrPrebuilt === 'object' && configPathOrPrebuilt !== null) {
+      // Gateway mode: accept pre-built AppConfig directly
+      this.config = configPathOrPrebuilt;
+      this.configPath = '(gateway)';
+      this.mode = 'gateway';
+    } else {
+      this.configPath = configPathOrPrebuilt || CONFIG_FILE;
+      this.config = this.loadAndValidate(this.configPath, activeRouteOrMode);
+      this.mode = 'standard';
+    }
+  }
+
+  /** Create a ConfigService for gateway mode — no config file needed */
+  static forGateway(options: GatewayOptions = {}): ConfigService {
+    // Build providers: all 7 with default base URLs, empty keys unless overridden
+    const providers: ProviderConfig[] = SUPPORTED_PROVIDERS.map((name) => ({
+      name,
+      api_base_url: options.providerUrls?.[name] || PROVIDER_BASE_URLS[name],
+      api_key: options.providers?.[name]
+        ? interpolateEnvVar(options.providers[name]!)
+        : '',
+    }));
+
+    const config: AppConfig = {
+      LOG: false,
+      API_TIMEOUT_MS: options.timeoutMs ?? 300_000,
+      PORT: options.port ?? 0,
+      PROXY_URL: options.proxyUrl,
+      LOG_FILE: options.logToFile ?? false,
+      LOG_MAX_SIZE: '10m',
+      LOG_MAX_FILES: 5,
+      Providers: providers,
+      Routes: { gateway: { sonnet: 'anthropic,claude-sonnet-4-20250514' } },
+      ActiveRoute: 'gateway',
+      Router: { sonnet: 'anthropic,claude-sonnet-4-20250514' },
+    };
+
+    return new ConfigService(config, 'gateway');
   }
 
   private loadAndValidate(configPath: string, activeRouteOverride?: string): AppConfig {
@@ -197,15 +249,7 @@ export class ConfigService {
   }
 
   private interpolateEnvVar(value: string): string {
-    if (value.startsWith('$')) {
-      const envName = value.substring(1);
-      const envValue = process.env[envName];
-      if (!envValue) {
-        throw new Error(`Environment variable ${envName} is not set (referenced in config api_key)`);
-      }
-      return envValue;
-    }
-    return value;
+    return interpolateEnvVar(value);
   }
 
   get<K extends keyof AppConfig>(key: K): AppConfig[K] {

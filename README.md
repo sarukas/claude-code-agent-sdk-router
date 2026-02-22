@@ -62,6 +62,152 @@ export ANTHROPIC_API_KEY=ccasr-proxy
 claude
 ```
 
+## Gateway mode (Agent SDK integration)
+
+Gateway mode turns ccasr into a stateless, multi-tenant format-converting gateway for applications using the Anthropic Agent SDK (`ClaudeSDKClient`). No config file required — all routing and credentials are per-request.
+
+### Why gateway mode?
+
+The Claude Agent SDK spawns `claude.exe` as a subprocess. The subprocess reads `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` from its environment and makes HTTP requests with only standard headers (`x-api-key` or `Authorization: Bearer`). There is no mechanism to inject custom HTTP headers.
+
+Gateway mode solves this with **passthrough authentication**: the incoming `x-api-key` header (set by `ANTHROPIC_API_KEY`) IS the provider's actual API key. ccasr extracts the target provider from the model field and forwards the key to that provider.
+
+### Quick start
+
+```bash
+# Start the gateway
+ccasr gateway --port 8901
+```
+
+Then configure your Agent SDK application:
+
+```python
+import os
+
+# Point the SDK at ccasr
+os.environ["ANTHROPIC_BASE_URL"] = "http://127.0.0.1:8901"
+
+# The API key IS the provider key — ccasr forwards it to the target provider
+os.environ["ANTHROPIC_API_KEY"] = orchestration.openrouter_api_key  # e.g., "sk-or-v1-..."
+
+# Model field specifies provider + model (split on first comma)
+os.environ["ANTHROPIC_MODEL"] = "openrouter,google/gemini-2.5-flash"
+```
+
+That's it. The SDK sends requests to ccasr, which:
+1. Extracts `openrouter` as the provider and `google/gemini-2.5-flash` as the model
+2. Uses the incoming `x-api-key` (`sk-or-v1-...`) as the OpenRouter API key
+3. Converts Anthropic format to OpenAI format, sends to OpenRouter
+4. Converts the response back to Anthropic format, returns to the SDK
+
+### Credential resolution order
+
+| Priority | Source | When to use |
+|----------|--------|-------------|
+| 1 | `X-Provider-Api-Key` header | Raw SDK clients that can set custom headers |
+| 2 | `X-Credential-Id` header | Multi-tenant apps using the credential store |
+| 3 | Passthrough (`x-api-key` / `Authorization: Bearer`) | Agent SDK — the only option since custom headers can't be injected |
+| 4 | Pre-configured key (from `createGateway({ providers })`) | Single-tenant deployments with known keys |
+| 5 | 401 error | No key found |
+
+Passthrough (priority 3) is only active when `proxySecret` is NOT set — these are mutually exclusive. Localhost binding is the security boundary.
+
+### Credential store (optional)
+
+For applications that can make HTTP calls but can't set custom headers on SDK requests (e.g., a backend that manages multiple user sessions):
+
+```bash
+# Register a credential with TTL
+curl -X POST http://127.0.0.1:8901/v1/credentials \
+  -H 'Content-Type: application/json' \
+  -d '{"provider": "openrouter", "api_key": "sk-or-v1-...", "ttl_seconds": 3600}'
+# → {"credential_id": "cred_a1b2c3...", "expires_in_seconds": 3600}
+
+# Use it on requests (for clients that CAN set custom headers)
+curl -X POST http://127.0.0.1:8901/v1/messages \
+  -H 'X-Credential-Id: cred_a1b2c3...' \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "openrouter,google/gemini-2.5-flash", "max_tokens": 100, "messages": [...]}'
+
+# Revoke early
+curl -X DELETE http://127.0.0.1:8901/v1/credentials/cred_a1b2c3...
+```
+
+Credentials auto-expire after TTL (default 1 hour, max 24 hours).
+
+### Library usage (programmatic)
+
+```typescript
+import { createGateway } from 'claude-code-agent-sdk-router';
+
+const gw = await createGateway({
+  port: 8901,                    // default: 0 (OS-assigned)
+  host: '127.0.0.1',            // default: 127.0.0.1
+  logToConsole: true,            // default: true
+  timeoutMs: 300000,             // default: 300s
+  providers: {                   // optional: pre-configure keys
+    openrouter: 'sk-or-...',
+    gemini: '$GEMINI_API_KEY',   // env var interpolation works
+  },
+  providerUrls: {                // optional: override base URLs
+    ollama: 'http://gpu-server:11434/v1/chat/completions',
+  },
+});
+
+const { port } = gw.address();
+console.log(`Gateway on port ${port}`);
+
+// Graceful shutdown
+await gw.close();
+```
+
+### Proxy authentication
+
+If you need to restrict access to the gateway (e.g., it's not on localhost):
+
+```bash
+ccasr gateway --port 8901 --secret my-proxy-token
+```
+
+When `--secret` is set, every request must include `x-api-key: my-proxy-token`. However, this means the `x-api-key` header is consumed for proxy auth and **cannot** also carry the provider key — use `X-Provider-Api-Key` header or the credential store instead. Passthrough mode is disabled.
+
+### Health endpoint
+
+```bash
+curl http://127.0.0.1:8901/health
+```
+
+```json
+{
+  "status": "ok",
+  "mode": "gateway",
+  "providers": ["anthropic", "openrouter", "gemini", "openai", "groq", "mistral", "ollama"],
+  "transformers": ["anthropic", "openrouter", "gemini", "openai", "groq", "mistral", "ollama"],
+  "features": {
+    "per_request_credentials": true,
+    "credential_store": true,
+    "passthrough_auth": true,
+    "streaming": true,
+    "image_conversion": true,
+    "thinking_support": true
+  }
+}
+```
+
+### Model field format
+
+Gateway mode requires `"provider,model"` format — no tier-based fallback:
+
+| Provider | Model field |
+|----------|-------------|
+| Anthropic | `anthropic,claude-sonnet-4-20250514` |
+| OpenRouter | `openrouter,google/gemini-2.5-flash` |
+| Gemini | `gemini,gemini-2.5-flash` |
+| OpenAI | `openai,gpt-4.1` |
+| Groq | `groq,llama-3.3-70b-versatile` |
+| Mistral | `mistral,codestral-latest` |
+| Ollama | `ollama,qwen2.5-coder:latest` |
+
 ## CLI
 
 | Command | Description |
@@ -69,6 +215,7 @@ claude
 | `ccasr setup` | Interactive setup wizard — creates or edits `~/.ccasr/config.json` |
 | `ccasr start` | Start the proxy server (foreground, Ctrl-C to stop) |
 | `ccasr run <command>` | Start proxy + launch command (e.g. `ccasr run claude`) |
+| `ccasr gateway` | Start in gateway mode — no config file, per-request credentials |
 | `ccasr version` | Print version and Node version |
 | `ccasr help` | Show usage instructions |
 
@@ -269,9 +416,9 @@ See [TESTING.md](TESTING.md) for the full testing guide — test descriptions, C
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/v1/messages` | Main routing endpoint — accepts Anthropic format, routes to configured provider |
-| `GET` | `/health` | Health check — returns status, version, providers, active route |
-
-That's it. Two endpoints. Nothing else.
+| `GET` | `/health` | Health check — returns status, version, providers, mode |
+| `POST` | `/v1/credentials` | Register a credential with TTL (gateway mode only) |
+| `DELETE` | `/v1/credentials/:id` | Revoke a credential (gateway mode only) |
 
 ## Architecture
 

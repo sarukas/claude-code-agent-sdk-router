@@ -5,10 +5,11 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import pino from 'pino';
 import { mkdirSync } from 'fs';
 import { join } from 'path';
-import type { AppConfig } from './types';
+import type { AppConfig, GatewayOptions } from './types';
 import { ConfigService, CONFIG_DIR } from './services/config';
 import { ProviderService } from './services/provider';
 import { TransformerService } from './services/transformer';
+import { CredentialStore } from './services/credentials';
 import { errorHandler } from './api/middleware';
 import { registerRoutes } from './api/routes';
 import { CaptureLogger } from './utils/capture';
@@ -20,6 +21,8 @@ export interface ServerContext {
   providers: ProviderService;
   transformers: TransformerService;
   capture?: CaptureLogger;
+  credentials?: CredentialStore;
+  proxySecret?: string;
 }
 
 export async function createServer(configPath?: string, activeRoute?: string, opts?: { quiet?: boolean }): Promise<{ app: FastifyInstance; context: ServerContext }> {
@@ -168,6 +171,100 @@ export async function startServer(configPath?: string, activeRoute?: string): Pr
     app.log.error(err);
     process.exit(1);
   }
+}
+
+export interface GatewayInstance {
+  app: FastifyInstance;
+  context: ServerContext;
+  port: number;
+  address(): { port: number; host: string };
+  close(): Promise<void>;
+}
+
+export async function createGateway(options: GatewayOptions = {}): Promise<GatewayInstance> {
+  const config = ConfigService.forGateway(options);
+  const appConfig = config.getConfig();
+
+  const providers = new ProviderService(appConfig.Providers);
+  const transformers = new TransformerService();
+  const credentials = new CredentialStore();
+
+  const context: ServerContext = {
+    config, providers, transformers, credentials,
+    proxySecret: options.proxySecret,
+  };
+
+  // Build logger — gateway defaults to console-only, no file
+  const logToConsole = options.logToConsole !== false;
+  const logger = logToConsole
+    ? pino({ level: 'info' })
+    : pino({ level: 'silent' });
+
+  const app = Fastify({
+    loggerInstance: logger as any,
+    bodyLimit: 50 * 1024 * 1024,
+  });
+
+  app.setErrorHandler(errorHandler);
+  app.decorate('serverContext', context);
+
+  // Proxy auth PreHandler — validate proxySecret via x-api-key header
+  if (options.proxySecret) {
+    app.addHook('preHandler', async (request, reply) => {
+      // Skip health endpoint
+      if (request.url === '/health') return;
+      const apiKey = request.headers['x-api-key'] as string | undefined;
+      if (apiKey !== options.proxySecret) {
+        return reply.code(401).send({
+          error: { message: 'Missing or invalid x-api-key', type: 'auth_error' },
+        });
+      }
+    });
+  }
+
+  // PreHandler: extract provider,model from request body (gateway mode)
+  app.addHook('preHandler', async (request, reply) => {
+    if (request.method !== 'POST' || !(request.url.startsWith('/v1/messages') || request.url.startsWith('/v1beta/'))) return;
+
+    const body = request.body as any;
+    if (!body?.model) {
+      return reply.code(400).send({ error: { message: 'Missing model in request body', type: 'invalid_request' } });
+    }
+
+    const comma = (body.model as string).indexOf(',');
+    if (comma === -1) {
+      // Gateway mode: require "provider,model" format — no tier-based fallback
+      return reply.code(400).send({
+        error: {
+          message: `Gateway mode requires "provider,model" format (e.g., "openrouter,google/gemini-2.5-flash"), got: "${body.model}"`,
+          type: 'invalid_request',
+        },
+      });
+    }
+
+    (request as any).providerName = body.model.substring(0, comma);
+    body.model = body.model.substring(comma + 1);
+  });
+
+  registerRoutes(app, context);
+
+  const host = options.host || '127.0.0.1';
+  const port = options.port ?? 0;
+  const listenAddress = await app.listen({ port, host });
+  const boundPort = (app.server.address() as any)?.port ?? port;
+
+  app.log.info(`Gateway listening on ${listenAddress}`);
+
+  return {
+    app,
+    context,
+    port: boundPort,
+    address() { return { port: boundPort, host }; },
+    async close() {
+      credentials.clear();
+      await app.close();
+    },
+  };
 }
 
 export { LOGS_DIR };

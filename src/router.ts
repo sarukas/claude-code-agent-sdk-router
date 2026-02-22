@@ -43,9 +43,53 @@ export async function routeRequest(
   const providerName = (request as any).providerName as string;
 
   // Resolve provider config
-  const provider = context.providers.get(providerName);
-  if (!provider) {
+  const baseProvider = context.providers.get(providerName);
+  if (!baseProvider) {
     throw createApiError(`Provider '${providerName}' not found`, 404, 'provider_not_found');
+  }
+
+  // --- Credential resolution (gateway mode support) ---
+  // Priority: X-Provider-Api-Key header > X-Credential-Id header > passthrough (x-api-key / Authorization) > pre-configured key > 401
+  let provider = baseProvider;
+  const isGateway = context.config.mode === 'gateway';
+
+  const providerApiKeyHeader = request.headers['x-provider-api-key'] as string | undefined;
+  const credentialIdHeader = request.headers['x-credential-id'] as string | undefined;
+
+  if (providerApiKeyHeader) {
+    // Direct header override — works with raw SDK clients that can set custom headers
+    provider = { ...baseProvider, api_key: providerApiKeyHeader };
+  } else if (credentialIdHeader && context.credentials) {
+    // Credential store lookup
+    const cred = context.credentials.resolve(credentialIdHeader);
+    if (!cred) {
+      throw createApiError('Credential not found or expired', 401, 'auth_error');
+    }
+    if (cred.provider !== providerName) {
+      throw createApiError(
+        `Credential is for provider '${cred.provider}', but request targets '${providerName}'`,
+        400, 'invalid_request',
+      );
+    }
+    provider = { ...baseProvider, api_key: cred.api_key };
+  } else if (isGateway && !baseProvider.api_key && !context.proxySecret) {
+    // Passthrough mode: x-api-key / Authorization header IS the provider key.
+    // Only active in gateway mode when no proxySecret is set (mutually exclusive).
+    const xApiKey = request.headers['x-api-key'] as string | undefined;
+    const authHeader = request.headers['authorization'] as string | undefined;
+    const passthroughKey = xApiKey || (authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined);
+    if (passthroughKey) {
+      provider = { ...baseProvider, api_key: passthroughKey };
+    }
+  }
+
+  if (isGateway && !provider.api_key) {
+    throw createApiError(
+      `No API key for provider '${providerName}'. ` +
+      'Pass X-Provider-Api-Key header, register via POST /v1/credentials, ' +
+      'or set ANTHROPIC_API_KEY to the provider key (passthrough mode).',
+      401, 'auth_error',
+    );
   }
 
   // Get the Anthropic transformer (always the endpoint transformer for Claude Code)

@@ -3,7 +3,18 @@
   "version": "0.1.0",
   "description": "Minimal, auditable Claude Code and Agent SDK router — Anthropic · OpenRouter · Gemini · OpenAI · Groq · Mistral · Ollama",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "type": "commonjs",
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./gateway": {
+      "require": "./dist/core/server.js",
+      "types": "./dist/core/server.d.ts"
+    }
+  },
   "bin": {
     "ccasr": "dist/cli.js"
   },
