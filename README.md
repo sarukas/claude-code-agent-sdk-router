@@ -210,9 +210,22 @@ curl http://127.0.0.1:8901/health
 }
 ```
 
+### Model tier fallback
+
+Claude Code internally switches model tiers — it may send `claude-haiku-4-5-20241022` for subagents or `claude-opus-4-20250514` for complex tasks, even when `ANTHROPIC_MODEL` is set to a different value. In standard mode, these bare model names are classified into tiers (opus/sonnet/haiku) and resolved via the config's route sets.
+
+In gateway mode, there are no route sets. Instead, **bare model names fall back to the same provider and model as the session's main `"provider,model"` request.** The gateway remembers the provider,model from the first explicit `"provider,model"` request per session (keyed by `x-api-key` header), and routes all subsequent bare model names to the same destination.
+
+Example: if `ANTHROPIC_MODEL=openrouter,google/gemini-2.5-flash`, then:
+- `model: "openrouter,google/gemini-2.5-flash"` — routes to OpenRouter / gemini-2.5-flash (and remembers this)
+- `model: "claude-haiku-4-5-20241022"` — also routes to OpenRouter / gemini-2.5-flash (fallback)
+- `model: "claude-opus-4-20250514"` — also routes to OpenRouter / gemini-2.5-flash (fallback)
+
+This means all tiers go to the same model, which is suboptimal but ensures nothing breaks. The first request in a session must use `"provider,model"` format — bare model names before any explicit request return a 400 error.
+
 ### Model field format
 
-Gateway mode requires `"provider,model"` format — no tier-based fallback:
+The primary routing mechanism uses `"provider,model"` format:
 
 | Provider | Model field |
 |----------|-------------|

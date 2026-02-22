@@ -222,6 +222,11 @@ export async function createGateway(options: GatewayOptions = {}): Promise<Gatew
     });
   }
 
+  // Session map: remembers the provider,model for each API key so bare model
+  // names (e.g., claude-haiku-*) fall back to the same provider and model as
+  // the session's main "provider,model" request. Keyed by x-api-key header.
+  const sessionMap = new Map<string, { provider: string; model: string }>();
+
   // PreHandler: extract provider,model from request body (gateway mode)
   app.addHook('preHandler', async (request, reply) => {
     if (request.method !== 'POST' || !(request.url.startsWith('/v1/messages') || request.url.startsWith('/v1beta/'))) return;
@@ -233,17 +238,38 @@ export async function createGateway(options: GatewayOptions = {}): Promise<Gatew
 
     const comma = (body.model as string).indexOf(',');
     if (comma === -1) {
-      // Gateway mode: require "provider,model" format — no tier-based fallback
-      return reply.code(400).send({
-        error: {
-          message: `Gateway mode requires "provider,model" format (e.g., "openrouter,google/gemini-2.5-flash"), got: "${body.model}"`,
-          type: 'invalid_request',
-        },
-      });
+      // Bare model name (e.g., "claude-haiku-4-5-20241022") — fall back to
+      // the same provider,model as this session's main "provider,model" request.
+      const sessionKey = (request.headers['x-api-key'] as string)
+        || (request.headers['authorization'] as string)
+        || '';
+      const session = sessionMap.get(sessionKey);
+      if (!session) {
+        return reply.code(400).send({
+          error: {
+            message: `No session found for bare model "${body.model}". Send at least one request with "provider,model" format first (e.g., "openrouter,google/gemini-2.5-flash").`,
+            type: 'invalid_request',
+          },
+        });
+      }
+      (request as any).providerName = session.provider;
+      body.model = session.model;
+      return;
     }
 
-    (request as any).providerName = body.model.substring(0, comma);
-    body.model = body.model.substring(comma + 1);
+    const providerName = body.model.substring(0, comma);
+    const modelName = body.model.substring(comma + 1);
+
+    // Remember this provider,model for bare-model fallback
+    const sessionKey = (request.headers['x-api-key'] as string)
+      || (request.headers['authorization'] as string)
+      || '';
+    if (sessionKey) {
+      sessionMap.set(sessionKey, { provider: providerName, model: modelName });
+    }
+
+    (request as any).providerName = providerName;
+    body.model = modelName;
   });
 
   registerRoutes(app, context);
