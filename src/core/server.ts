@@ -3,6 +3,7 @@
 
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
+import pino from 'pino';
 import { mkdirSync } from 'fs';
 import { join } from 'path';
 import type { AppConfig } from './types';
@@ -22,9 +23,9 @@ export interface ServerContext {
   capture?: CaptureLogger;
 }
 
-export async function createServer(configPath?: string): Promise<{ app: FastifyInstance; context: ServerContext }> {
+export async function createServer(configPath?: string, activeRoute?: string): Promise<{ app: FastifyInstance; context: ServerContext }> {
   // Load config
-  const config = new ConfigService(configPath);
+  const config = new ConfigService(configPath, activeRoute);
   const appConfig = config.getConfig();
 
   // Create services
@@ -38,38 +39,37 @@ export async function createServer(configPath?: string): Promise<{ app: FastifyI
     context.capture = new CaptureLogger(LOGS_DIR);
   }
 
-  // Build logger config with optional file transport
+  // Build logger config.
+  // Console output uses main-thread pino.destination (unbuffered).
+  // File output uses pino-roll transport (worker thread, buffered — fine for files).
   const logLevel = appConfig.LOG ? 'debug' : 'info';
   const logToFile = appConfig.LOG_FILE !== false;
 
-  let loggerConfig: any = { level: logLevel };
+  let logger: pino.Logger;
 
   if (logToFile) {
     mkdirSync(LOGS_DIR, { recursive: true });
-    loggerConfig = {
-      level: logLevel,
-      transport: {
-        targets: [
-          // Console output
-          { target: 'pino/file', options: { destination: 1 }, level: logLevel },
-          // Rotating file output
-          {
-            target: 'pino-roll',
-            options: {
-              file: join(LOGS_DIR, 'ccasr.log'),
-              size: appConfig.LOG_MAX_SIZE || '10m',
-              limit: { count: appConfig.LOG_MAX_FILES || 5 },
-            },
-            level: 'info', // always info to file, debug only to console when LOG=true
-          },
-        ],
+    const consoleStream = pino.destination({ dest: 1, sync: true });
+    const fileTransport = pino.transport({
+      target: 'pino-roll',
+      options: {
+        file: join(LOGS_DIR, 'ccasr.log'),
+        size: appConfig.LOG_MAX_SIZE || '10m',
+        limit: { count: appConfig.LOG_MAX_FILES || 5 },
       },
-    };
+    });
+    const multistream = pino.multistream([
+      { stream: consoleStream, level: logLevel as pino.Level },
+      { stream: fileTransport, level: 'info' as pino.Level },
+    ]);
+    logger = pino({ level: logLevel }, multistream);
+  } else {
+    logger = pino({ level: logLevel });
   }
 
   // Create Fastify instance
   const app = Fastify({
-    logger: loggerConfig,
+    loggerInstance: logger as any,
     bodyLimit: 50 * 1024 * 1024, // 50MB for large context windows
   });
 
@@ -111,14 +111,42 @@ export async function createServer(configPath?: string): Promise<{ app: FastifyI
   return { app, context };
 }
 
-export async function startServer(configPath?: string): Promise<void> {
-  const { app, context } = await createServer(configPath);
+export function printBanner(context: ServerContext): void {
+  const config = context.config;
+  const appConfig = config.getConfig();
+  const port = appConfig.PORT;
+
+  console.log('\n========================================');
+  console.log('  ccasr — Claude Code Agent SDK Router');
+  console.log('========================================');
+  console.log(`  Config:     ${config.configPath}`);
+  console.log(`  Port:       ${port}`);
+  console.log(`  Logging:    ${appConfig.LOG ? 'ON' : 'OFF'}`);
+
+  // Providers
+  const providers = appConfig.Providers;
+  console.log(`  Providers:  ${providers.map(p => p.name).join(', ')}`);
+
+  // Active route
+  const formatEntry = (e: string) => { const i = e.indexOf(','); return `${e.substring(0, i)} / ${e.substring(i + 1)}`; };
+  const routeNames = Object.keys(appConfig.Routes);
+  console.log(`  Routes:     ${routeNames.join(', ')}`);
+  console.log(`  Active:     ${appConfig.ActiveRoute}`);
+  const router = appConfig.Router;
+  console.log(`    sonnet:   ${formatEntry(router.sonnet)}`);
+  if (router.opus) console.log(`    opus:     ${formatEntry(router.opus)}`);
+  if (router.haiku) console.log(`    haiku:    ${formatEntry(router.haiku)}`);
+  console.log('========================================');
+}
+
+export async function startServer(configPath?: string, activeRoute?: string): Promise<void> {
+  const { app, context } = await createServer(configPath, activeRoute);
   const port = context.config.get('PORT');
 
   try {
     const address = await app.listen({ port, host: '127.0.0.1' });
     app.log.info(`Server listening on ${address}`);
-    console.log(`\nccasr running on http://127.0.0.1:${port}`);
+    printBanner(context);
     console.log(`\nTo use with Claude Code:`);
     console.log(`  export ANTHROPIC_BASE_URL=http://127.0.0.1:${port}`);
     console.log(`  export ANTHROPIC_API_KEY=any-non-empty-string\n`);

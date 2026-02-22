@@ -7,8 +7,19 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import JSON5 from 'json5';
-import type { AppConfig, ModelTier, ProviderConfig, SupportedProvider } from '../types';
+import type { AppConfig, ModelTier, ProviderConfig, RouterConfig, SupportedProvider } from '../types';
 import { SUPPORTED_PROVIDERS } from '../types';
+
+// Provider base URLs — duplicated from cli/constants to avoid circular dep
+const PROVIDER_BASE_URLS: Record<SupportedProvider, string> = {
+  anthropic: 'https://api.anthropic.com',
+  openrouter: 'https://openrouter.ai/api/v1/chat/completions',
+  gemini: 'https://generativelanguage.googleapis.com/v1beta/models/',
+  openai: 'https://api.openai.com/v1/chat/completions',
+  groq: 'https://api.groq.com/openai/v1/chat/completions',
+  mistral: 'https://api.mistral.ai/v1/chat/completions',
+  ollama: 'http://localhost:11434/v1/chat/completions',
+};
 
 const MODEL_TIER_PATTERNS: Array<{ tier: ModelTier; match: string }> = [
   { tier: 'opus',   match: 'opus' },
@@ -27,13 +38,14 @@ const DEFAULT_CONFIG: Partial<AppConfig> = {
 
 export class ConfigService {
   private config: AppConfig;
+  readonly configPath: string;
 
-  constructor(configPath?: string) {
-    const path = configPath || CONFIG_FILE;
-    this.config = this.loadAndValidate(path);
+  constructor(configPath?: string, activeRouteOverride?: string) {
+    this.configPath = configPath || CONFIG_FILE;
+    this.config = this.loadAndValidate(this.configPath, activeRouteOverride);
   }
 
-  private loadAndValidate(configPath: string): AppConfig {
+  private loadAndValidate(configPath: string, activeRouteOverride?: string): AppConfig {
     if (!existsSync(configPath)) {
       throw new Error(
         `Config file not found: ${configPath}\n` +
@@ -58,41 +70,95 @@ export class ConfigService {
       LOG_MAX_SIZE: raw.LOG_MAX_SIZE || '10m',
       LOG_MAX_FILES: raw.LOG_MAX_FILES || 5,
       Providers: [],
+      Routes: {},
+      ActiveRoute: '',
       Router: { sonnet: '' },
     };
 
-    // Validate and interpolate providers
-    if (!Array.isArray(raw.Providers) || raw.Providers.length === 0) {
-      throw new Error('Config must have at least one provider in Providers[]');
+    // --- Parse Providers ---
+    // New format: { "anthropic": "$KEY", ... }
+    // Old format: [{ name, api_base_url, api_key, models? }, ...]
+    if (raw.Providers && !Array.isArray(raw.Providers) && typeof raw.Providers === 'object') {
+      // New format: object { name: apiKey }
+      for (const [name, apiKey] of Object.entries(raw.Providers)) {
+        this.validateProviderName(name);
+        const provider = name as SupportedProvider;
+        config.Providers.push({
+          name: provider,
+          api_base_url: PROVIDER_BASE_URLS[provider],
+          api_key: this.interpolateEnvVar(apiKey as string),
+        });
+      }
+    } else if (Array.isArray(raw.Providers) && raw.Providers.length > 0) {
+      // Old format: array of provider objects (backward compat)
+      for (const p of raw.Providers) {
+        this.validateProviderLegacy(p);
+        config.Providers.push({
+          name: p.name as SupportedProvider,
+          api_base_url: p.api_base_url || PROVIDER_BASE_URLS[p.name as SupportedProvider],
+          api_key: this.interpolateEnvVar(p.api_key),
+        });
+      }
+    } else {
+      throw new Error('Config must have Providers (object or array)');
     }
 
-    for (const p of raw.Providers) {
-      this.validateProvider(p);
-      config.Providers.push({
-        name: p.name as SupportedProvider,
-        api_base_url: p.api_base_url,
-        api_key: this.interpolateEnvVar(p.api_key),
-        models: p.models,
-      });
+    if (config.Providers.length === 0) {
+      throw new Error('Config must have at least one provider');
     }
 
-    // Validate Router
-    if (!raw.Router) {
-      throw new Error('Config must have a Router section');
+    // --- Parse Routes ---
+    // New format: Routes: { "direct": { sonnet, opus?, haiku? }, ... } + ActiveRoute
+    // Old format: Router: { sonnet, opus?, haiku? }
+    if (raw.Routes && typeof raw.Routes === 'object') {
+      // New format
+      for (const [routeName, routeSet] of Object.entries(raw.Routes)) {
+        const rs = routeSet as any;
+        if (!rs.sonnet) {
+          throw new Error(`Route set "${routeName}" must have a sonnet tier`);
+        }
+        config.Routes[routeName] = {
+          sonnet: rs.sonnet,
+          ...(rs.opus ? { opus: rs.opus } : {}),
+          ...(rs.haiku ? { haiku: rs.haiku } : {}),
+        };
+      }
+
+      if (Object.keys(config.Routes).length === 0) {
+        throw new Error('Config must have at least one route set in Routes');
+      }
+
+      // Resolve active route
+      const activeRouteName = activeRouteOverride || raw.ActiveRoute;
+      if (!activeRouteName) {
+        throw new Error('Config must have ActiveRoute (or use --route flag)');
+      }
+      if (!config.Routes[activeRouteName]) {
+        const available = Object.keys(config.Routes).join(', ');
+        throw new Error(`ActiveRoute "${activeRouteName}" not found in Routes. Available: ${available}`);
+      }
+      config.ActiveRoute = activeRouteName;
+      config.Router = config.Routes[activeRouteName];
+    } else if (raw.Router) {
+      // Old format: single Router object (backward compat)
+      const routerRaw = raw.Router;
+      const sonnetEntry = routerRaw.sonnet || routerRaw.default;
+      if (!sonnetEntry) {
+        throw new Error('Config must have Router.sonnet (e.g., "anthropic,claude-sonnet-4-20250514")');
+      }
+
+      const routerConfig: RouterConfig = { sonnet: sonnetEntry };
+      if (routerRaw.opus) routerConfig.opus = routerRaw.opus;
+      if (routerRaw.haiku) routerConfig.haiku = routerRaw.haiku;
+
+      config.Routes = { default: routerConfig };
+      config.ActiveRoute = 'default';
+      config.Router = routerConfig;
+    } else {
+      throw new Error('Config must have Routes (named route sets) or Router');
     }
 
-    // Backward compat: migrate Router.default → Router.sonnet
-    const routerRaw = raw.Router;
-    const sonnetEntry = routerRaw.sonnet || routerRaw.default;
-    if (!sonnetEntry) {
-      throw new Error('Config must have Router.sonnet (e.g., "anthropic,claude-sonnet-4-20250514")');
-    }
-
-    config.Router = { sonnet: sonnetEntry };
-    if (routerRaw.opus) config.Router.opus = routerRaw.opus;
-    if (routerRaw.haiku) config.Router.haiku = routerRaw.haiku;
-
-    // Validate all tier entries
+    // Validate all tier entries in the active route set
     this.validateRouterEntry('Router.sonnet', config.Router.sonnet, config.Providers);
     if (config.Router.opus) {
       this.validateRouterEntry('Router.opus', config.Router.opus, config.Providers);
@@ -104,15 +170,19 @@ export class ConfigService {
     return config;
   }
 
-  private validateProvider(p: any): void {
-    if (!p.name || !p.api_base_url || !p.api_key) {
-      throw new Error(`Provider missing required fields (name, api_base_url, api_key): ${JSON.stringify(p)}`);
-    }
-    if (!(SUPPORTED_PROVIDERS as readonly string[]).includes(p.name)) {
+  private validateProviderName(name: string): void {
+    if (!(SUPPORTED_PROVIDERS as readonly string[]).includes(name)) {
       throw new Error(
-        `Invalid provider name "${p.name}". Must be one of: ${SUPPORTED_PROVIDERS.join(', ')}`,
+        `Invalid provider name "${name}". Must be one of: ${SUPPORTED_PROVIDERS.join(', ')}`,
       );
     }
+  }
+
+  private validateProviderLegacy(p: any): void {
+    if (!p.name || !p.api_key) {
+      throw new Error(`Provider missing required fields (name, api_key): ${JSON.stringify(p)}`);
+    }
+    this.validateProviderName(p.name);
   }
 
   private validateRouterEntry(field: string, value: string, providers: ProviderConfig[]): void {

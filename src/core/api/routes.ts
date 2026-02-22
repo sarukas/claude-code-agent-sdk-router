@@ -11,10 +11,13 @@ const VERSION = '0.1.0';
 export function registerRoutes(app: FastifyInstance, context: ServerContext): void {
   // Health check
   app.get('/health', async () => {
+    const appConfig = context.config.getConfig();
     return {
       status: 'ok',
       version: VERSION,
       providers: context.providers.getNames(),
+      activeRoute: appConfig.ActiveRoute,
+      routes: Object.keys(appConfig.Routes),
       timestamp: new Date().toISOString(),
     };
   });

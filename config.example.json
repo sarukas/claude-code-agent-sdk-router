@@ -16,58 +16,40 @@
   // "LOG_MAX_SIZE": "10m",   // rotate at this size (default: 10m)
   // "LOG_MAX_FILES": 5,      // keep this many rotated files (default: 5)
 
-  "Providers": [
-    {
-      "name": "anthropic",
-      "api_base_url": "https://api.anthropic.com",
-      "api_key": "$ANTHROPIC_API_KEY"
-    },
-    {
-      "name": "openrouter",
-      "api_base_url": "https://openrouter.ai/api/v1/chat/completions",
-      "api_key": "$OPENROUTER_API_KEY",
-      "models": ["google/gemini-2.5-pro-preview", "anthropic/claude-sonnet-4"]
-    },
-    {
-      "name": "gemini",
-      "api_base_url": "https://generativelanguage.googleapis.com/v1beta/models/",
-      "api_key": "$GEMINI_API_KEY",
-      "models": ["gemini-2.5-flash", "gemini-2.5-pro"]
-    },
-    {
-      "name": "openai",
-      "api_base_url": "https://api.openai.com/v1/chat/completions",
-      "api_key": "$OPENAI_API_KEY",
-      "models": ["gpt-4o", "gpt-4.1"]
-    },
-    {
-      "name": "groq",
-      "api_base_url": "https://api.groq.com/openai/v1/chat/completions",
-      "api_key": "$GROQ_API_KEY",
-      "models": ["llama-3.3-70b-versatile", "moonshotai/kimi-k2-instruct"]
-    },
-    {
-      "name": "mistral",
-      "api_base_url": "https://api.mistral.ai/v1/chat/completions",
-      "api_key": "$MISTRAL_API_KEY",
-      "models": ["codestral-latest", "mistral-large-latest"]
-    },
-    {
-      "name": "ollama",
-      "api_base_url": "http://localhost:11434/v1/chat/completions",
-      "api_key": "ollama",
-      "models": ["qwen2.5-coder:latest"]
-    }
-  ],
+  // Providers — just credentials. Base URLs are built-in defaults.
+  // Use "$ENV_VAR" to reference environment variables.
+  "Providers": {
+    "anthropic": "$ANTHROPIC_API_KEY",
+    "openrouter": "$OPENROUTER_API_KEY",
+    "gemini": "$GEMINI_API_KEY",
+    "openai": "$OPENAI_API_KEY",
+    "groq": "$GROQ_API_KEY",
+    "mistral": "$MISTRAL_API_KEY",
+    "ollama": "ollama"
+  },
 
-  // Route Claude Code requests by model tier.
-  // Format: "providerName,modelName" — split on first comma.
-  // "sonnet" is required (also the fallback for opus/haiku if not specified).
+  // Named route sets — different model mixes for different scenarios.
+  // Each tier value: "providerName,modelName" — split on first comma.
+  // "sonnet" is required (also the fallback). "opus" and "haiku" are optional.
   // Claude Code sends model names like "claude-sonnet-4-20250514" — the proxy
   // classifies them by tier (opus/sonnet/haiku) and routes accordingly.
-  "Router": {
-    "opus":   "openrouter,google/gemini-2.5-pro-preview",
-    "sonnet": "anthropic,claude-sonnet-4-20250514",
-    "haiku":  "groq,llama-3.3-70b-versatile"
-  }
+  "Routes": {
+    "direct": {
+      "opus":   "anthropic,claude-opus-4-20250514",
+      "sonnet": "anthropic,claude-sonnet-4-20250514",
+      "haiku":  "anthropic,claude-haiku-4-5-20241022"
+    },
+    "mixed": {
+      "opus":   "openrouter,google/gemini-2.5-pro-preview",
+      "sonnet": "anthropic,claude-sonnet-4-20250514",
+      "haiku":  "groq,llama-3.3-70b-versatile"
+    },
+    "cheap": {
+      "sonnet": "gemini,gemini-2.5-flash",
+      "haiku":  "gemini,gemini-2.5-flash"
+    }
+  },
+
+  // Which route set to use by default. Override with: ccasr start --route mixed
+  "ActiveRoute": "direct"
 }

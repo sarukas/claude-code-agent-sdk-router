@@ -26,7 +26,6 @@ export interface ProviderConfig {
   name: SupportedProvider;
   api_base_url: string;
   api_key: string;
-  models?: string[];
 }
 
 export type ModelTier = 'opus' | 'sonnet' | 'haiku';
@@ -46,7 +45,9 @@ export interface AppConfig {
   LOG_MAX_SIZE?: string;    // default '10m' — rotate at this size
   LOG_MAX_FILES?: number;   // default 5 — keep this many rotated files
   Providers: ProviderConfig[];
-  Router: RouterConfig;
+  Routes: Record<string, RouterConfig>;
+  ActiveRoute: string;
+  Router: RouterConfig;     // resolved active route set (computed at load time)
 }
 
 // ---------------------------------------------------------------------------

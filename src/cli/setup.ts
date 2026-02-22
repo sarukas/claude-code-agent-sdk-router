@@ -14,14 +14,19 @@ import { selectOne, selectMany, promptInput } from './menu';
 // Types
 // ---------------------------------------------------------------------------
 
+interface RouteSet {
+  sonnet: string;
+  opus?: string;
+  haiku?: string;
+}
+
 interface SetupState {
   providers: Array<{
     name: SupportedProvider;
-    api_base_url: string;
     api_key: string;
-    models?: string[];
   }>;
-  router: { sonnet: string; opus?: string; haiku?: string };
+  routes: Record<string, RouteSet>;
+  activeRoute: string;
   port: number;
   log: boolean;
 }
@@ -87,27 +92,57 @@ function loadExistingConfig(configFile: string): SetupState | null {
   try {
     const raw = JSON5.parse(readFileSync(configFile, 'utf-8'));
     const providers: SetupState['providers'] = [];
-    if (Array.isArray(raw.Providers)) {
-      for (const p of raw.Providers) {
-        if (p.name && (SUPPORTED_PROVIDERS as readonly string[]).includes(p.name)) {
-          providers.push({
-            name: p.name,
-            api_base_url: p.api_base_url || PROVIDER_DEFAULTS[p.name as SupportedProvider].baseUrl,
-            api_key: p.api_key || '',
-            ...(p.models?.length ? { models: p.models } : {}),
-          });
+
+    // New format: Providers as object { name: apiKey }
+    if (raw.Providers && !Array.isArray(raw.Providers) && typeof raw.Providers === 'object') {
+      for (const [name, apiKey] of Object.entries(raw.Providers)) {
+        if ((SUPPORTED_PROVIDERS as readonly string[]).includes(name)) {
+          providers.push({ name: name as SupportedProvider, api_key: apiKey as string });
         }
       }
     }
-    const router: SetupState['router'] = {
-      sonnet: raw.Router?.sonnet || raw.Router?.default || '',
-    };
-    if (raw.Router?.opus) router.opus = raw.Router.opus;
-    if (raw.Router?.haiku) router.haiku = raw.Router.haiku;
+    // Old format: Providers as array
+    else if (Array.isArray(raw.Providers)) {
+      for (const p of raw.Providers) {
+        if (p.name && (SUPPORTED_PROVIDERS as readonly string[]).includes(p.name)) {
+          providers.push({ name: p.name, api_key: p.api_key || '' });
+        }
+      }
+    }
+
+    // Parse routes
+    let routes: Record<string, RouteSet> = {};
+    let activeRoute = 'default';
+
+    if (raw.Routes && typeof raw.Routes === 'object') {
+      // New format: named route sets
+      for (const [name, rs] of Object.entries(raw.Routes)) {
+        const routeSet = rs as any;
+        if (routeSet.sonnet) {
+          routes[name] = {
+            sonnet: routeSet.sonnet,
+            ...(routeSet.opus ? { opus: routeSet.opus } : {}),
+            ...(routeSet.haiku ? { haiku: routeSet.haiku } : {}),
+          };
+        }
+      }
+      activeRoute = raw.ActiveRoute || Object.keys(routes)[0] || 'default';
+    } else if (raw.Router) {
+      // Old format: single Router object
+      const sonnet = raw.Router.sonnet || raw.Router.default || '';
+      if (sonnet) {
+        routes['default'] = {
+          sonnet,
+          ...(raw.Router.opus ? { opus: raw.Router.opus } : {}),
+          ...(raw.Router.haiku ? { haiku: raw.Router.haiku } : {}),
+        };
+      }
+    }
 
     return {
       providers,
-      router,
+      routes,
+      activeRoute,
       port: raw.PORT ?? 3456,
       log: raw.LOG ?? false,
     };
@@ -128,13 +163,25 @@ function printSummary(state: SetupState): void {
   console.log(`
   Current configuration:
 
-    Providers:  ${providerList || '(none)'}
-    Sonnet:     ${formatRouterEntry(state.router.sonnet)}
-    Opus:       ${formatRouterEntry(state.router.opus)}
-    Haiku:      ${formatRouterEntry(state.router.haiku)}
-    Port:       ${state.port}
-    Logging:    ${state.log ? 'ON — full request/response capture' : 'OFF'}
-`);
+    Providers:    ${providerList || '(none)'}
+    Active route: ${state.activeRoute}
+    Port:         ${state.port}
+    Logging:      ${state.log ? 'ON — full request/response capture' : 'OFF'}`);
+
+  const routeNames = Object.keys(state.routes);
+  if (routeNames.length > 0) {
+    for (const name of routeNames) {
+      const rs = state.routes[name];
+      const marker = name === state.activeRoute ? ' *' : '';
+      console.log(`    Route "${name}"${marker}:`);
+      console.log(`      sonnet: ${formatRouterEntry(rs.sonnet)}`);
+      if (rs.opus) console.log(`      opus:   ${formatRouterEntry(rs.opus)}`);
+      if (rs.haiku) console.log(`      haiku:  ${formatRouterEntry(rs.haiku)}`);
+    }
+  } else {
+    console.log('    Routes: (none)');
+  }
+  console.log('');
 }
 
 // ---------------------------------------------------------------------------
@@ -156,39 +203,40 @@ async function runInitialWizard(knownModels: KnownModels): Promise<SetupState> {
   }
 
   // 2. API keys
-  const providers = await collectApiKeys(selectedProviders, knownModels);
+  const providers = await collectApiKeys(selectedProviders);
 
-  // 3. Router tiers
+  // 3. Create a default route set
   const configuredNames = providers.map((p) => p.name);
-  const router = await editRouterTiers(configuredNames, knownModels, {
-    sonnet: '',
-  });
+  const routeSet = await editRouterTiers(configuredNames, knownModels, { sonnet: '' });
 
-  // 4. Port
+  // 4. Route set name
+  console.log('');
+  const routeName = await promptInput('Name for this route set', 'default');
+
+  // 5. Port
   console.log('');
   const portStr = await promptInput('Port (press Enter for default 3456)', '3456');
   const port = parseInt(portStr, 10) || 3456;
 
-  return { providers, router, port, log: false };
+  return {
+    providers,
+    routes: { [routeName || 'default']: routeSet },
+    activeRoute: routeName || 'default',
+    port,
+    log: false,
+  };
 }
 
 async function collectApiKeys(
   selectedProviders: SupportedProvider[],
-  knownModels: KnownModels,
 ): Promise<SetupState['providers']> {
   const providers: SetupState['providers'] = [];
   for (const name of selectedProviders) {
     const defaults = PROVIDER_DEFAULTS[name];
-    const models = knownModels[name];
 
     if (!defaults.envVar) {
       // Ollama — no key needed
-      providers.push({
-        name,
-        api_base_url: defaults.baseUrl,
-        api_key: 'ollama',
-        ...(models?.length ? { models } : {}),
-      });
+      providers.push({ name, api_key: 'ollama' });
       continue;
     }
 
@@ -211,12 +259,7 @@ async function collectApiKeys(
       }
     }
 
-    providers.push({
-      name,
-      api_base_url: defaults.baseUrl,
-      api_key: apiKey,
-      ...(models?.length ? { models } : {}),
-    });
+    providers.push({ name, api_key: apiKey });
   }
   return providers;
 }
@@ -251,27 +294,26 @@ async function editProviders(state: SetupState, knownModels: KnownModels): Promi
   for (const name of newNames) {
     if (!currentNames.has(name)) {
       const def = PROVIDER_DEFAULTS[name];
-      const models = knownModels[name];
       state.providers.push({
         name,
-        api_base_url: def.baseUrl,
         api_key: def.envVar ? `$${def.envVar}` : 'ollama',
-        ...(models?.length ? { models } : {}),
       });
     }
   }
 
-  // Clear router tiers that reference removed providers
+  // Clear route tiers that reference removed providers
   for (const name of removed) {
-    for (const tier of ['sonnet', 'opus', 'haiku'] as const) {
-      const entry = state.router[tier];
-      if (entry && entry.startsWith(name + ',')) {
-        if (tier === 'sonnet') {
-          state.router.sonnet = '';
-          console.log(`  Warning: Sonnet tier cleared — it referenced removed provider "${name}".`);
-        } else {
-          delete state.router[tier];
-          console.log(`  Note: ${tier} tier cleared — it referenced removed provider "${name}".`);
+    for (const [routeName, rs] of Object.entries(state.routes)) {
+      for (const tier of ['sonnet', 'opus', 'haiku'] as const) {
+        const entry = rs[tier];
+        if (entry && entry.startsWith(name + ',')) {
+          if (tier === 'sonnet') {
+            rs.sonnet = '';
+            console.log(`  Warning: "${routeName}".sonnet cleared — it referenced removed provider "${name}".`);
+          } else {
+            delete rs[tier];
+            console.log(`  Note: "${routeName}".${tier} cleared — it referenced removed provider "${name}".`);
+          }
         }
       }
     }
@@ -307,8 +349,8 @@ async function editApiKeys(state: SetupState): Promise<void> {
 async function editRouterTiers(
   providerNames: SupportedProvider[],
   knownModels: KnownModels,
-  current: SetupState['router'],
-): Promise<SetupState['router']> {
+  current: RouteSet,
+): Promise<RouteSet> {
   const modelOptions = buildModelOptions(providerNames, knownModels);
   const customEntry = '[custom entry]';
 
@@ -386,6 +428,61 @@ async function editRouterTiers(
   };
 }
 
+async function editRoutes(state: SetupState, knownModels: KnownModels): Promise<void> {
+  const providerNames = state.providers.map((p) => p.name);
+  const routeNames = Object.keys(state.routes);
+
+  while (true) {
+    console.log('');
+    const options = [
+      ...routeNames.map((n) => `Edit "${n}"${n === state.activeRoute ? ' *' : ''}`),
+      'Add new route set',
+      ...(routeNames.length > 1 ? ['Remove a route set'] : []),
+      'Set active route',
+      'Back to main menu',
+    ];
+    const choice = await selectOne(options, 'Route sets:');
+
+    if (choice < routeNames.length) {
+      // Edit existing route set
+      const name = routeNames[choice];
+      state.routes[name] = await editRouterTiers(providerNames, knownModels, state.routes[name]);
+    } else if (choice === routeNames.length) {
+      // Add new route set
+      console.log('');
+      const name = await promptInput('Name for the new route set');
+      if (!name) continue;
+      if (state.routes[name]) {
+        console.log(`  Route "${name}" already exists. Use edit instead.`);
+        continue;
+      }
+      state.routes[name] = await editRouterTiers(providerNames, knownModels, { sonnet: '' });
+      routeNames.push(name);
+    } else if (routeNames.length > 1 && choice === routeNames.length + 1) {
+      // Remove a route set
+      console.log('');
+      const removeIdx = await selectOne(routeNames, 'Which route set to remove?');
+      const removeName = routeNames[removeIdx];
+      if (removeName === state.activeRoute) {
+        console.log(`  Cannot remove the active route "${removeName}". Set a different active route first.`);
+        continue;
+      }
+      delete state.routes[removeName];
+      routeNames.splice(removeIdx, 1);
+      console.log(`  Removed route "${removeName}".`);
+    } else if (choice === options.length - 2) {
+      // Set active route
+      console.log('');
+      const activeIdx = await selectOne(routeNames, 'Which route set should be active?');
+      state.activeRoute = routeNames[activeIdx];
+      console.log(`  Active route set to "${state.activeRoute}".`);
+    } else {
+      // Back
+      break;
+    }
+  }
+}
+
 async function editPort(state: SetupState): Promise<void> {
   console.log('');
   const portStr = await promptInput('Port (press Enter for default 3456)', String(state.port));
@@ -397,16 +494,19 @@ async function editPort(state: SetupState): Promise<void> {
 // ---------------------------------------------------------------------------
 
 function saveConfig(state: SetupState, configFile: string): void {
+  // Build Providers as object { name: apiKey }
+  const providers: Record<string, string> = {};
+  for (const p of state.providers) {
+    providers[p.name] = p.api_key;
+  }
+
   const config: Record<string, any> = {
     LOG: state.log,
     API_TIMEOUT_MS: 300000,
     PORT: state.port,
-    Providers: state.providers,
-    Router: {
-      sonnet: state.router.sonnet,
-      ...(state.router.opus ? { opus: state.router.opus } : {}),
-      ...(state.router.haiku ? { haiku: state.router.haiku } : {}),
-    },
+    Providers: providers,
+    Routes: state.routes,
+    ActiveRoute: state.activeRoute,
   };
 
   mkdirSync(dirname(configFile), { recursive: true });
@@ -442,6 +542,11 @@ function printNextSteps(port: number): void {
     ${cmd} start          Start the proxy server
     ${cmd} run claude     Start proxy + launch Claude Code
 
+  Named routes:
+
+    ${cmd} start --route mixed     Start with a different route set
+    ${cmd} run --route cheap claude
+
   Or set env vars manually:
 
     export ANTHROPIC_BASE_URL=http://127.0.0.1:${port}
@@ -456,7 +561,7 @@ function printNextSteps(port: number): void {
 const MENU_OPTIONS = [
   'Edit providers',
   'Edit API keys',
-  'Edit model routing',
+  'Edit route sets',
   'Edit port',
   'Toggle detailed logging',
   'Save and exit',
@@ -478,11 +583,9 @@ async function mainMenuLoop(state: SetupState, knownModels: KnownModels, configF
         await editApiKeys(state);
         break;
 
-      case 2: { // Edit model routing
-        const providerNames = state.providers.map((p) => p.name);
-        state.router = await editRouterTiers(providerNames, knownModels, state.router);
+      case 2: // Edit route sets
+        await editRoutes(state, knownModels);
         break;
-      }
 
       case 3: // Edit port
         await editPort(state);
@@ -497,20 +600,31 @@ async function mainMenuLoop(state: SetupState, knownModels: KnownModels, configF
         }
         break;
 
-      case 5: // Save and exit
-        if (!state.router.sonnet) {
-          console.log('  Cannot save: Sonnet tier (required) is not configured.');
-          console.log('  Please configure model routing first.');
+      case 5: { // Save and exit
+        // Check all route sets have sonnet configured
+        const routeNames = Object.keys(state.routes);
+        if (routeNames.length === 0) {
+          console.log('  Cannot save: no route sets configured.');
+          break;
+        }
+        const incomplete = routeNames.filter((n) => !state.routes[n].sonnet);
+        if (incomplete.length > 0) {
+          console.log(`  Cannot save: route set "${incomplete[0]}" has no sonnet tier.`);
           break;
         }
         if (state.providers.length === 0) {
           console.log('  Cannot save: no providers configured.');
           break;
         }
+        if (!state.routes[state.activeRoute]) {
+          console.log(`  Cannot save: active route "${state.activeRoute}" not found.`);
+          break;
+        }
         saveConfig(state, configFile);
         await validateConfig(configFile);
         printNextSteps(state.port);
         return;
+      }
 
       case 6: // Exit without saving
         console.log('  Exiting without saving.\n');

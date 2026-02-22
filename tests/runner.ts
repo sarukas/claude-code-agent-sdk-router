@@ -1,15 +1,13 @@
-// Test runner — discovers configured providers, runs all test suites, prints summary.
+// Test runner — derives test targets from the active route set.
 //
 // Usage:
-//   npx tsx tests/runner.ts [baseUrl] [provider] [test]
-//   npx tsx tests/runner.ts --config path/to/config.json [baseUrl] [provider] [test]
+//   npx tsx tests/runner.ts [baseUrl] [filter]
+//   npx tsx tests/runner.ts --config path/to/config.json [baseUrl] [filter]
+//   npx tsx tests/runner.ts --route mixed [baseUrl] [filter]
 //
-// The --config flag tells the runner which config to read for provider/model
-// discovery. It does NOT change the server's config — the server must already
-// be running with the matching config.
-//
-// SDK tests iterate ALL models in each provider's models[] array,
-// so you get coverage across e.g. all 5 OpenRouter models.
+// The --route flag selects which named route set to test (overrides ActiveRoute).
+// Provider tests: 5 basic tests per unique provider in the active route set.
+// SDK tests: 8 tests per tier entry in the active route set.
 
 import { readFileSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -36,15 +34,15 @@ interface ProviderSuite {
   tests: TestFn[];
 }
 
-const ALL_SUITES: ProviderSuite[] = [
-  anthropicTests,
-  openrouterTests,
-  geminiTests,
-  openaiTests,
-  groqTests,
-  mistralTests,
-  ollamaTests,
-];
+const PROVIDER_SUITES: Record<string, ProviderSuite> = {
+  anthropic: anthropicTests,
+  openrouter: openrouterTests,
+  gemini: geminiTests,
+  openai: openaiTests,
+  groq: groqTests,
+  mistral: mistralTests,
+  ollama: ollamaTests,
+};
 
 // ---------------------------------------------------------------------------
 // Arg parsing
@@ -52,17 +50,20 @@ const ALL_SUITES: ProviderSuite[] = [
 
 function parseArgs(argv: string[]): {
   configPath: string;
+  activeRoute?: string;
   baseUrl: string;
-  filterProvider?: string;
   filterTest?: string;
 } {
   const args = argv.slice(2); // skip node + script
   let configPath = join(DEFAULT_CONFIG_DIR, 'config.json');
+  let activeRoute: string | undefined;
   let positional: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--config' && i + 1 < args.length) {
       configPath = args[++i];
+    } else if (args[i] === '--route' && i + 1 < args.length) {
+      activeRoute = args[++i];
     } else {
       positional.push(args[i]);
     }
@@ -70,10 +71,40 @@ function parseArgs(argv: string[]): {
 
   return {
     configPath,
+    activeRoute,
     baseUrl: positional[0] || 'http://127.0.0.1:3456',
-    filterProvider: positional[1],
-    filterTest: positional[2],
+    filterTest: positional[1],
   };
+}
+
+// ---------------------------------------------------------------------------
+// Route target resolution
+// ---------------------------------------------------------------------------
+
+interface RouteTarget {
+  tier: string;
+  provider: string;
+  model: string;
+}
+
+function parseRoute(entry: string): { provider: string; model: string } {
+  const i = entry.indexOf(',');
+  return { provider: entry.substring(0, i), model: entry.substring(i + 1) };
+}
+
+function getRouteTargets(routeSet: Record<string, string>): RouteTarget[] {
+  const targets: RouteTarget[] = [];
+  for (const tier of ['sonnet', 'opus', 'haiku']) {
+    const entry = routeSet[tier];
+    if (!entry) continue;
+    const { provider, model } = parseRoute(entry);
+    targets.push({ tier, provider, model });
+  }
+  return targets;
+}
+
+function getUniqueProviders(targets: RouteTarget[]): string[] {
+  return [...new Set(targets.map((t) => t.provider))];
 }
 
 // ---------------------------------------------------------------------------
@@ -81,9 +112,9 @@ function parseArgs(argv: string[]): {
 // ---------------------------------------------------------------------------
 
 async function main() {
-  const { configPath, baseUrl, filterProvider, filterTest } = parseArgs(process.argv);
+  const { configPath, activeRoute: activeRouteFlag, baseUrl, filterTest } = parseArgs(process.argv);
 
-  // Load config to discover configured providers
+  // Load config to discover routes
   let config: any;
   try {
     config = JSON5.parse(readFileSync(configPath, 'utf-8'));
@@ -92,18 +123,45 @@ async function main() {
     process.exit(1);
   }
 
-  const configuredProviders = new Map<string, any>();
-  for (const p of config.Providers || []) {
-    configuredProviders.set(p.name, p);
+  // Resolve the active route set
+  let activeRouteName: string;
+  let activeRouteSet: Record<string, string>;
+
+  if (config.Routes && typeof config.Routes === 'object') {
+    // New format
+    activeRouteName = activeRouteFlag || config.ActiveRoute || Object.keys(config.Routes)[0];
+    if (!config.Routes[activeRouteName]) {
+      const available = Object.keys(config.Routes).join(', ');
+      console.error(`ERROR: Route "${activeRouteName}" not found. Available: ${available}`);
+      process.exit(1);
+    }
+    activeRouteSet = config.Routes[activeRouteName];
+  } else if (config.Router) {
+    // Old format (backward compat)
+    activeRouteName = 'default';
+    activeRouteSet = config.Router;
+    // Normalize: Router.default → Router.sonnet
+    if (activeRouteSet.default && !activeRouteSet.sonnet) {
+      activeRouteSet.sonnet = activeRouteSet.default;
+    }
+  } else {
+    console.error('ERROR: Config has no Routes or Router section');
+    process.exit(1);
   }
+
+  const targets = getRouteTargets(activeRouteSet);
+  const uniqueProviders = getUniqueProviders(targets);
 
   console.log('\n========================================');
   console.log('  ccasr test runner');
   console.log('========================================');
   console.log(`  Target:     ${baseUrl}`);
   console.log(`  Config:     ${configPath}`);
-  console.log(`  Providers:  ${[...configuredProviders.keys()].join(', ')}`);
-  if (filterProvider) console.log(`  Filter:     provider=${filterProvider}`);
+  console.log(`  Route:      ${activeRouteName}`);
+  for (const t of targets) {
+    console.log(`    ${t.tier}: ${t.provider} / ${t.model}`);
+  }
+  console.log(`  Providers:  ${uniqueProviders.join(', ')}`);
   if (filterTest) console.log(`  Filter:     test=${filterTest}`);
   console.log('');
 
@@ -123,74 +181,40 @@ async function main() {
   const allResults: TestResult[] = [];
   const startTime = Date.now();
 
-  // Run provider suites (use first model only — these are basic provider sanity tests)
-  for (const suite of ALL_SUITES) {
-    if (filterProvider && suite.providerName !== filterProvider) continue;
-    if (!configuredProviders.has(suite.providerName)) {
-      console.log(`SKIP  ${suite.providerName} (not configured)`);
+  // --- Provider tests: one run per unique provider in the route set ---
+  for (const providerName of uniqueProviders) {
+    const suite = PROVIDER_SUITES[providerName];
+    if (!suite) {
+      console.log(`SKIP  ${providerName} (no test suite)`);
       continue;
     }
 
-    const providerConfig = configuredProviders.get(suite.providerName);
-    const model = getFirstModel(suite.providerName, providerConfig, config.Router);
+    // Find the first model for this provider from the route targets
+    const target = targets.find((t) => t.provider === providerName);
+    if (!target) continue;
 
     const ctx: TestContext = {
       baseUrl,
-      provider: suite.providerName,
-      model,
+      provider: providerName,
+      model: target.model,
       apiKey: 'test-key',
     };
 
-    // Filter tests if specified
     let testsToRun = suite.tests;
     if (filterTest) {
       testsToRun = testsToRun.filter(t => t.name === filterTest);
     }
-
     if (testsToRun.length === 0) continue;
 
-    console.log(`\n--- ${suite.providerName} (${model}) ---`);
-    const results = await runTests(suite.providerName, testsToRun, ctx);
+    console.log(`\n--- ${providerName} (${target.model}) ---`);
+    const results = await runTests(providerName, testsToRun, ctx);
     printResults(results);
     allResults.push(...results);
   }
 
-  // Run Agent SDK suite — iterate ALL models per provider
-  if (!filterProvider || filterProvider === 'agent-sdk' || filterProvider.startsWith('agent-sdk:')) {
-    const sdkProviderFilter = filterProvider?.startsWith('agent-sdk:')
-      ? filterProvider.split(':')[1]
-      : undefined;
-
-    // Build list of (provider, model) targets — one entry per model
-    const sdkTargets: Array<{ provider: string; model: string; label: string }> = [];
-
-    for (const suite of ALL_SUITES) {
-      if (sdkProviderFilter && suite.providerName !== sdkProviderFilter) continue;
-      if (!configuredProviders.has(suite.providerName)) continue;
-
-      const providerConfig = configuredProviders.get(suite.providerName);
-      const models = getAllModels(suite.providerName, providerConfig, config.Router);
-
-      for (const model of models) {
-        sdkTargets.push({
-          provider: suite.providerName,
-          model,
-          label: `agent-sdk:${suite.providerName}`,
-        });
-      }
-    }
-
-    // Fallback if filterProvider === 'agent-sdk' matched nothing
-    if (sdkTargets.length === 0 && filterProvider === 'agent-sdk') {
-      const defaultRoute = parseRoute(config.Router.sonnet || config.Router.default);
-      sdkTargets.push({
-        provider: defaultRoute.provider,
-        model: defaultRoute.model,
-        label: 'agent-sdk',
-      });
-    }
-
-    for (const target of sdkTargets) {
+  // --- SDK tests: one run per tier in the route set ---
+  if (!filterTest || filterTest === 'agent-sdk') {
+    for (const target of targets) {
       const sdkCtx: TestContext = {
         baseUrl,
         provider: target.provider,
@@ -204,8 +228,9 @@ async function main() {
       }
 
       if (sdkTests.length > 0) {
-        console.log(`\n--- ${target.label} (${target.provider}/${target.model}) ---`);
-        const sdkResults = await runTests(target.label, sdkTests, sdkCtx);
+        const label = `agent-sdk:${target.tier}`;
+        console.log(`\n--- ${label} (${target.provider}/${target.model}) ---`);
+        const sdkResults = await runTests(label, sdkTests, sdkCtx);
         printResults(sdkResults);
         allResults.push(...sdkResults);
       }
@@ -243,6 +268,7 @@ async function main() {
     timestamp: new Date().toISOString(),
     baseUrl,
     configPath,
+    route: activeRouteName,
     durationSeconds: parseFloat(totalTime),
     summary: { passed, failed, expectedFail, total },
     results: allResults,
@@ -267,39 +293,6 @@ function printResults(results: TestResult[]): void {
       console.log(`  FAIL  ${r.test} (${r.durationMs}ms) -- ${r.error?.slice(0, 80)}`);
     }
   }
-}
-
-function parseRoute(entry: string): { provider: string; model: string } {
-  const i = entry.indexOf(',');
-  return { provider: entry.substring(0, i), model: entry.substring(i + 1) };
-}
-
-/** Return the first model for a provider (for basic provider tests) */
-function getFirstModel(provider: string, providerConfig: any, router: any): string {
-  if (providerConfig.models && providerConfig.models.length > 0) {
-    return providerConfig.models[0];
-  }
-  for (const [, entry] of Object.entries(router) as [string, string][]) {
-    if (entry.startsWith(provider + ',')) {
-      return entry.split(',').slice(1).join(',');
-    }
-  }
-  return 'default';
-}
-
-/** Return ALL models for a provider (for SDK multi-model tests) */
-function getAllModels(provider: string, providerConfig: any, router: any): string[] {
-  if (providerConfig.models && providerConfig.models.length > 0) {
-    return providerConfig.models;
-  }
-  // Fall back to models referenced in Router entries
-  const models: string[] = [];
-  for (const [, entry] of Object.entries(router) as [string, string][]) {
-    if (entry.startsWith(provider + ',')) {
-      models.push(entry.split(',').slice(1).join(','));
-    }
-  }
-  return models.length > 0 ? models : ['default'];
 }
 
 main().catch((err) => {

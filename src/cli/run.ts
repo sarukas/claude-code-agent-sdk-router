@@ -1,9 +1,9 @@
 // Run wrapper — starts proxy, injects env vars, launches child process.
 
 import { spawn } from 'child_process';
-import { createServer } from '../core/server';
+import { createServer, printBanner } from '../core/server';
 
-export async function runCommand(args: string[], configPath?: string): Promise<void> {
+export async function runCommand(args: string[], configPath?: string, activeRoute?: string): Promise<void> {
   if (args.length === 0) {
     console.error('Usage: ccasr run <command> [args...]');
     console.error('Example: ccasr run claude');
@@ -14,7 +14,7 @@ export async function runCommand(args: string[], configPath?: string): Promise<v
   const cmdArgs = args.slice(1);
 
   // 1. Start proxy server
-  const { app, context } = await createServer(configPath);
+  const { app, context } = await createServer(configPath, activeRoute);
   const port = context.config.get('PORT');
 
   try {
@@ -24,8 +24,8 @@ export async function runCommand(args: string[], configPath?: string): Promise<v
     process.exit(1);
   }
 
-  console.log(`Proxy running on http://127.0.0.1:${port}`);
-  console.log(`Launching: ${cmd} ${cmdArgs.join(' ')}\n`);
+  printBanner(context);
+  console.log(`\nLaunching: ${cmd} ${cmdArgs.join(' ')}\n`);
 
   // 2. Spawn child with env vars injected
   const child = spawn(cmd, cmdArgs, {
