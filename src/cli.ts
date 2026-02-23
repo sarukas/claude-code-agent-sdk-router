@@ -142,44 +142,44 @@ switch (command) {
     console.log(`
 ccasr v${VERSION} — Claude Code Agent SDK Router
 
-Usage: ${cmd} <command> [--config <path>] [--route <name>]
+Routes Claude Code and Agent SDK requests to 7 LLM providers:
+Anthropic, OpenRouter, Gemini, OpenAI, Groq, Mistral, Ollama.
 
-Commands:
-  setup     Interactive setup wizard — creates or edits config file
-  start     Start the proxy server (foreground, Ctrl-C to stop)
-  run       Start proxy + launch command (e.g. ${cmd} run claude)
-  gateway   Start in gateway mode — no config file, per-request credentials
-  version   Print version info
-  help      Show this help message
+Two modes of operation:
 
-Options:
+  STANDARD MODE — Single-user Claude Code with config file.
+    ${cmd} setup                    Interactive config wizard
+    ${cmd} start                    Start proxy (foreground)
+    ${cmd} run claude               Start proxy + launch Claude Code
+    ${cmd} run --route cheap claude  Use a named route set
+
+  GATEWAY MODE — Multi-tenant Agent SDK, no config file needed.
+    ${cmd} gateway --port 8901      Start gateway on port 8901
+    ${cmd} gateway                  Start on OS-assigned port
+
+    Each SDK session sets env vars before spawning claude:
+      ANTHROPIC_BASE_URL=http://127.0.0.1:<port>
+      ANTHROPIC_API_KEY=<provider-api-key>   (passthrough to provider)
+      ANTHROPIC_MODEL=openrouter,google/gemini-2.5-flash
+
+    The model field uses "provider,model" format. Bare model names
+    (e.g. claude-haiku-*) fall back to the session's main model.
+    Credentials pass through via x-api-key header — no custom headers needed.
+
+Standard mode options:
   --config <path>  Use alternative config file (default: ${CONFIG_FILE})
   --route <name>   Use a named route set (overrides ActiveRoute in config)
 
-Gateway options:
+Gateway mode options:
   --port <number>  Port to listen on (default: OS-assigned)
-  --secret <token> Require x-api-key header for proxy auth
+  --secret <token> Require x-api-key for proxy auth (disables passthrough)
 
-Quick start:
-  ${cmd} setup            Configure providers and routes
-  ${cmd} run claude       Start proxy and launch Claude Code
+Other commands:
+  ${cmd} version   Print version info
+  ${cmd} help      Show this help message
 
-Gateway mode (Agent SDK):
-  ${cmd} gateway --port 8901
-  Then set: ANTHROPIC_BASE_URL=http://127.0.0.1:8901
-            ANTHROPIC_API_KEY=<provider-api-key>
-            ANTHROPIC_MODEL=openrouter,google/gemini-2.5-flash
-
-Named routes:
-  ${cmd} start --route mixed     Start with "mixed" route set
-  ${cmd} run --route cheap claude
-
-Config:
-  ${CONFIG_FILE}
-
-Manual setup:
-  export ANTHROPIC_BASE_URL=http://127.0.0.1:3456
-  export ANTHROPIC_API_KEY=ccasr-proxy
+Config: ${CONFIG_FILE}
+Docs:   https://github.com/sarukas/claude-code-agent-sdk-router
 `);
     }
 }
