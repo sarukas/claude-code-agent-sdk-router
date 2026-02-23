@@ -2,7 +2,7 @@
 
 ## The Problem
 
-An application (e.g., a SaaS backend) needs to run **N concurrent Claude Agent SDK sessions**, each potentially targeting a different provider, model, and API key. The Agent SDK's `ClaudeSDKClient` spawns `claude.exe` as a subprocess — no custom HTTP headers can be injected. The only controls are environment variables set before spawn:
+An application (e.g., a SaaS backend) needs to run **N concurrent Claude Agent SDK sessions**, each potentially targeting a different provider, model, and API key. The Agent SDK's `ClaudeSDKClient` spawns `claude` binary as a subprocess — no custom HTTP headers can be injected. The only controls are environment variables set before spawn:
 
 | Env var | What claude.exe does with it |
 |---------|------------------------------|
