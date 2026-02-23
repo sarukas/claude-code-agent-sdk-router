@@ -27,30 +27,24 @@ Each provider has a transformer that converts between the Anthropic format and t
 ## Installation
 
 ```bash
-npm install -g https://github.com/sarukas/claude-code-agent-sdk-router.git
+git clone https://github.com/sarukas/claude-code-agent-sdk-router.git
+cd claude-code-agent-sdk-router
+npm install && npm run build && npm link
 ```
 
-This clones, builds, and links the `ccasr` command globally. The `prepare` script runs `tsc` automatically.
+This installs dependencies, compiles TypeScript to `dist/`, and symlinks the `ccasr` command globally.
 
-To update to the latest version:
+To update:
 
 ```bash
-npm install -g https://github.com/sarukas/claude-code-agent-sdk-router.git
+cd claude-code-agent-sdk-router
+git pull && npm install && npm run build
 ```
 
 To uninstall:
 
 ```bash
 npm uninstall -g claude-code-agent-sdk-router
-```
-
-### Alternative: install from source
-
-```bash
-git clone https://github.com/sarukas/claude-code-agent-sdk-router.git
-cd claude-code-agent-sdk-router
-npm install
-npm run build && npm link
 ```
 
 Without a global install, prefix commands with `npx tsx src/cli.ts` instead of `ccasr`.
