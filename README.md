@@ -8,7 +8,7 @@ A minimal, auditable API proxy that routes Claude Code and Agent SDK requests to
 ## Why this exists
 
 I built a large AI application on top of Anthropic Agent SDK when there were very few Agent SDKs around. As the application matured, I realized how deeply locked in this made me to Anthropic and it's ecosystem. 
-Don't get me wrong - Agent SDK is amazing - it is the core of Claude Code. It is very good. But, I needed options and alternatives. Hence, this router. 
+Don't get me wrong - Agent SDK is amazing - it is the core of Claude Code. It is very good. But, I needed options. Hence, this router. 
 It works both for Agent SDK and for Claude Code. My main focus was a good model swap-out solution for thr SDK, and Claude Code routing came along as a bonus. 
 Both work surprisingly well. It is also super weird to see Codex or Gemini to run within Claude's clothes :-). You can measure the models back to back more easily, 
 by having them compete in the same wrapper. 
