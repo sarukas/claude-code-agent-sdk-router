@@ -19,6 +19,7 @@
     "ccasr": "dist/cli.js"
   },
   "scripts": {
+    "prepare": "tsc",
     "build": "tsc",
     "dev": "tsx src/cli.ts start",
     "start": "node dist/cli.js start",
