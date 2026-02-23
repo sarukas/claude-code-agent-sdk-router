@@ -5,7 +5,7 @@
 import { existsSync } from 'fs';
 import { CONFIG_FILE } from './core/services/config';
 
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 
 function cliPrefix(): string {
   const argv1 = process.argv[1] || '';
