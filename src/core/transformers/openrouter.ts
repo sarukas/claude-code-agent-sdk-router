@@ -9,12 +9,32 @@
 
 import type { Transformer, UnifiedChatRequest, ProviderConfig } from '../types';
 import { generateToolId } from '../utils/id';
+import { sanitizeToolName, buildToolNameMap, restoreToolName } from '../utils/toolNameSanitizer';
 
 export class OpenRouterTransformer implements Transformer {
   name = 'openrouter';
+  private toolNameMap: Map<string, string> = new Map();
 
   async transformRequestIn(request: UnifiedChatRequest, provider: ProviderConfig): Promise<Record<string, any>> {
     const isClaude = request.model.includes('claude');
+    const isGemini = request.model.includes('google/') || request.model.includes('gemini');
+
+    // Sanitize tool names for Gemini models (rejects consecutive underscores)
+    if (isGemini && request.tools?.length) {
+      this.toolNameMap = buildToolNameMap(request.tools);
+      for (const tool of request.tools) {
+        tool.function.name = sanitizeToolName(tool.function.name);
+      }
+      for (const msg of request.messages) {
+        if (msg.tool_calls) {
+          for (const tc of msg.tool_calls) {
+            tc.function.name = sanitizeToolName(tc.function.name);
+          }
+        }
+      }
+    } else {
+      this.toolNameMap = new Map();
+    }
 
     for (const msg of request.messages) {
       if (Array.isArray(msg.content)) {
@@ -47,8 +67,15 @@ export class OpenRouterTransformer implements Transformer {
   }
 
   async transformResponseOut(response: Response): Promise<Response> {
+    const nameMap = this.toolNameMap;
     if (response.headers.get('Content-Type')?.includes('application/json')) {
-      const json = await response.json();
+      const json: any = await response.json();
+      // Restore sanitized tool names in JSON response
+      if (nameMap.size > 0 && json.choices?.[0]?.message?.tool_calls) {
+        for (const tc of json.choices[0].message.tool_calls) {
+          if (tc.function?.name) tc.function.name = restoreToolName(tc.function.name, nameMap);
+        }
+      }
       return new Response(JSON.stringify(json), {
         status: response.status, statusText: response.statusText, headers: response.headers,
       });
@@ -155,6 +182,13 @@ export class OpenRouterTransformer implements Transformer {
             // Normalize numeric tool call IDs
             if (data.choices?.[0]?.delta?.tool_calls?.length && !Number.isNaN(parseInt(data.choices[0].delta.tool_calls[0].id, 10))) {
               for (const tool of data.choices[0].delta.tool_calls) tool.id = generateToolId();
+            }
+
+            // Restore sanitized tool names for Gemini models
+            if (nameMap.size > 0 && data.choices?.[0]?.delta?.tool_calls?.length) {
+              for (const tool of data.choices[0].delta.tool_calls) {
+                if (tool.function?.name) tool.function.name = restoreToolName(tool.function.name, nameMap);
+              }
             }
 
             if (data.choices?.[0]?.delta?.tool_calls?.length && !hasToolCall) hasToolCall = true;

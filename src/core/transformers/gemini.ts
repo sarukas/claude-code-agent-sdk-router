@@ -9,6 +9,7 @@
 // Based on musistudio/llms gemini.transformer.ts + gemini.util.ts (MIT), simplified.
 
 import type { Transformer, UnifiedChatRequest, UnifiedMessage, ToolDefinition, ProviderConfig } from '../types';
+import { sanitizeToolName, buildToolNameMap, restoreToolName } from '../utils/toolNameSanitizer';
 
 // ---------------------------------------------------------------------------
 // Gemini schema processing — converts JSON Schema to Gemini-compatible format
@@ -124,7 +125,7 @@ function buildRequestBody(request: UnifiedChatRequest): Record<string, any> {
   const funcDecls = request.tools
     ?.filter((tool) => tool.function.name !== 'web_search')
     ?.map((tool) => ({
-      name: tool.function.name,
+      name: sanitizeToolName(tool.function.name),
       description: tool.function.description,
       parametersJsonSchema: tool.function.parameters,
     }));
@@ -167,7 +168,7 @@ function buildRequestBody(request: UnifiedChatRequest): Record<string, any> {
         parts.push({
           functionCall: {
             id: tc.id || `tool_${Math.random().toString(36).substring(2, 15)}`,
-            name: tc.function.name,
+            name: sanitizeToolName(tc.function.name),
             args: JSON.parse(tc.function.arguments || '{}'),
           },
           thoughtSignature: i === 0 && message.thinking?.signature ? message.thinking.signature : undefined,
@@ -182,7 +183,7 @@ function buildRequestBody(request: UnifiedChatRequest): Record<string, any> {
     if (role === 'model' && message.tool_calls) {
       const funcResponses = message.tool_calls.map((tc) => {
         const resp = toolResponses.find((r) => r.tool_call_id === tc.id);
-        return { functionResponse: { name: tc.function.name, response: { result: resp?.content } } };
+        return { functionResponse: { name: sanitizeToolName(tc.function.name), response: { result: resp?.content } } };
       });
       contents.push({ role: 'user', parts: funcResponses });
     }
@@ -222,7 +223,7 @@ function buildRequestBody(request: UnifiedChatRequest): Record<string, any> {
 // Response conversion: Gemini → OpenAI format
 // ---------------------------------------------------------------------------
 
-function convertGeminiJsonResponse(response: Response, jsonResponse: any): Response {
+function convertGeminiJsonResponse(response: Response, jsonResponse: any, nameMap: Map<string, string> = new Map()): Response {
   let thinkingContent = '';
   let thinkingSignature = '';
   const parts = jsonResponse.candidates?.[0]?.content?.parts || [];
@@ -240,7 +241,7 @@ function convertGeminiJsonResponse(response: Response, jsonResponse: any): Respo
     .map((p) => ({
       id: p.functionCall.id || `tool_${Math.random().toString(36).substring(2, 15)}`,
       type: 'function',
-      function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args || {}) },
+      function: { name: restoreToolName(p.functionCall.name, nameMap), arguments: JSON.stringify(p.functionCall.args || {}) },
     }));
 
   const textContent = nonThinkingParts.filter((p) => p.text).map((p) => p.text).join('\n') || '';
@@ -269,7 +270,7 @@ function convertGeminiJsonResponse(response: Response, jsonResponse: any): Respo
   return new Response(JSON.stringify(res), { status: response.status, statusText: response.statusText, headers: response.headers });
 }
 
-function convertGeminiStreamResponse(response: Response): Response {
+function convertGeminiStreamResponse(response: Response, nameMap: Map<string, string> = new Map()): Response {
   if (!response.body) return response;
 
   const decoder = new TextDecoder();
@@ -398,7 +399,7 @@ function convertGeminiStreamResponse(response: Response): Response {
           const fCalls = parts.filter((p: any) => p.functionCall).map((p: any) => ({
             id: p.functionCall.id || `ccr_tool_${Math.random().toString(36).substring(2, 15)}`,
             type: 'function',
-            function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args || {}) },
+            function: { name: restoreToolName(p.functionCall.name, nameMap), arguments: JSON.stringify(p.functionCall.args || {}) },
           }));
 
           for (const tool of fCalls) {
@@ -426,8 +427,10 @@ function convertGeminiStreamResponse(response: Response): Response {
 export class GeminiTransformer implements Transformer {
   name = 'gemini';
   endPoint = '/v1beta/models/:modelAndAction';
+  private toolNameMap: Map<string, string> = new Map();
 
   async transformRequestIn(request: UnifiedChatRequest, provider: ProviderConfig): Promise<Record<string, any>> {
+    this.toolNameMap = buildToolNameMap(request.tools);
     return {
       body: buildRequestBody(request),
       config: {
@@ -479,11 +482,12 @@ export class GeminiTransformer implements Transformer {
   }
 
   async transformResponseOut(response: Response): Promise<Response> {
+    const nameMap = this.toolNameMap;
     if (response.headers.get('Content-Type')?.includes('application/json')) {
       const json = await response.json();
-      return convertGeminiJsonResponse(response, json);
+      return convertGeminiJsonResponse(response, json, nameMap);
     } else if (response.headers.get('Content-Type')?.includes('stream')) {
-      return convertGeminiStreamResponse(response);
+      return convertGeminiStreamResponse(response, nameMap);
     }
     return response;
   }
