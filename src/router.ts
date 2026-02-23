@@ -17,9 +17,18 @@ import type { ProviderConfig, Transformer } from './core/types';
 import type { ServerContext } from './core/server';
 import { createApiError } from './core/api/middleware';
 import { TRANSFORMERS } from './core/transformers/registry';
-// undici is built into Node 18+ — use require to avoid needing @types/undici
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { ProxyAgent } = require('undici') as { ProxyAgent: new (url: string) => any };
+// Lazy-load undici ProxyAgent — only needed when PROXY_URL is set.
+let _ProxyAgent: (new (url: string) => any) | undefined;
+function getProxyAgent(url: string): any {
+  if (!_ProxyAgent) {
+    try {
+      _ProxyAgent = require('undici').ProxyAgent;
+    } catch {
+      throw new Error('PROXY_URL requires the "undici" package. Run: npm install undici');
+    }
+  }
+  return new _ProxyAgent!(url);
+}
 
 function maskHeaders(headers: Record<string, string>): Record<string, string> {
   const masked = { ...headers };
@@ -189,7 +198,7 @@ export async function routeRequest(
     signal: AbortSignal.timeout(timeoutMs),
   };
   if (proxyUrl) {
-    fetchOptions.dispatcher = new ProxyAgent(proxyUrl);
+    fetchOptions.dispatcher = getProxyAgent(proxyUrl);
   }
   let response = await fetch(url.toString(), fetchOptions);
 
