@@ -35,6 +35,12 @@ npm run build && npm link
 
 Without a global install, prefix commands with `npx tsx src/cli.ts` instead of `ccasr`.
 
+To uninstall:
+
+```bash
+npm uninstall -g claude-code-agent-sdk-router
+```
+
 ## CLI
 
 | Command | Description |
