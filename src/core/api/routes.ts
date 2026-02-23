@@ -11,7 +11,7 @@ import { SUPPORTED_PROVIDERS } from '../types';
 import { CredentialStore } from '../services/credentials';
 import { routeRequest } from '../../router';
 
-const VERSION = '0.1.1';
+const VERSION = '0.1.2';
 
 export function registerRoutes(app: FastifyInstance, context: ServerContext): void {
   const isGateway = context.config.mode === 'gateway';
