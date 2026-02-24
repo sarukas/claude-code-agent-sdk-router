@@ -13,7 +13,11 @@ It works both for Agent SDK and for Claude Code. My main focus was a good model 
 Both work surprisingly well. It is also super weird to see Codex or Gemini run within Claude's clothes :-). You can see how these models stack up against each other back to back by giving the same task to several Claude sessions easily. Seeing how they do 
 their work differently in the same wrapper is eye-opening. 
 
-See gifs of 30-second race to hello world between Codex, Gemini and Claude in tests folder.  
+Watch the 30-second race to hello world — the same task given to **Codex**, **Gemini**, and **Claude**, all running inside Claude Code's interface:
+
+![Codex running inside Claude Code](tests/codex.gif)
+
+*Full recordings: [Anthropic / Claude](tests/anthropic.gif) · [Codex / OpenAI](tests/codex.gif) · [Gemini / Google](tests/google.gif)*
 
 
 This local Claude Code router also has very comprehensive logging of full traffic, to help you debug and also understand how tools like Claude or Agent SDK work 
