@@ -5,6 +5,7 @@ A minimal, auditable API proxy that routes Claude Code and Agent SDK requests to
 **Anthropic** · **OpenRouter** · **Gemini** · **OpenAI** · **Groq** · **Mistral** · **Ollama**
 
 ---
+
 ## Why this exists
 
 I built a large AI application on top of Anthropic Agent SDK when it just appeared. As the application matured, I realized how deeply locked in to Anthropic's ecosystem I've become. 
@@ -13,12 +14,11 @@ It works both for Agent SDK and for Claude Code. My main focus was a good model 
 Both work surprisingly well. It is also super weird to see Codex or Gemini run within Claude's clothes :-). You can see how these models stack up against each other back to back by giving the same task to several Claude sessions easily. Seeing how they do 
 their work differently in the same wrapper is eye-opening. 
 
-Watch the 30-second race to hello world — the same task given to **Codex**, **Gemini**, and **Claude**, all running inside Claude Code's interface:
+Watch the 30-second race to hello world — the same task given to **Codex**, **Gemini**, and **Claude**, all running inside Claude Code's interface. First up is Codex, and it fails hilariously (to be fair, in other runs it succeeded):
 
 ![Codex running inside Claude Code](tests/codex.gif)
 
 *Full recordings: [Anthropic / Claude](tests/anthropic.gif) · [Codex / OpenAI](tests/codex.gif) · [Gemini / Google](tests/google.gif)*
-
 
 This local Claude Code router also has very comprehensive logging of full traffic, to help you debug and also understand how tools like Claude or Agent SDK work 
 under the hood. You can inspect system prompts, tool call details and all the little tricks that make modern AI feel real. 
@@ -31,10 +31,10 @@ Each provider has a transformer that converts between the Anthropic format and t
 
 ## Two modes of operation
 
-| Mode | Use case | Config | Credentials | Model routing |
-|------|----------|--------|-------------|---------------|
-| **Standard** (`ccasr start` / `ccasr run`) | Single user running Claude Code locally | `~/.ccasr/config.json` | From config file | Tier-based (opus/sonnet/haiku) via named route sets |
-| **Gateway** (`ccasr gateway` / `createGateway()`) | Multi-tenant Agent SDK applications | None required | Per-request (passthrough or header) | Explicit `"provider,model"` format with session fallback |
+| Mode                                              | Use case                                | Config                 | Credentials                         | Model routing                                            |
+| ------------------------------------------------- | --------------------------------------- | ---------------------- | ----------------------------------- | -------------------------------------------------------- |
+| **Standard** (`ccasr start` / `ccasr run`)        | Single user running Claude Code locally | `~/.ccasr/config.json` | From config file                    | Tier-based (opus/sonnet/haiku) via named route sets      |
+| **Gateway** (`ccasr gateway` / `createGateway()`) | Multi-tenant Agent SDK applications     | None required          | Per-request (passthrough or header) | Explicit `"provider,model"` format with session fallback |
 
 ## Prerequisites
 
@@ -68,37 +68,37 @@ Without a global install, prefix commands with `npx tsx src/cli.ts` instead of `
 
 ## CLI
 
-| Command | Description |
-|---------|-------------|
-| `ccasr setup` | Interactive setup wizard — creates or edits `~/.ccasr/config.json` |
-| `ccasr start` | Start the proxy server (foreground, Ctrl-C to stop) |
-| `ccasr run <command>` | Start proxy + launch command (e.g. `ccasr run claude`) |
-| `ccasr gateway` | Start in gateway mode — no config file, per-request credentials |
-| `ccasr version` | Print version and Node version |
-| `ccasr help` | Show usage instructions |
+| Command               | Description                                                        |
+| --------------------- | ------------------------------------------------------------------ |
+| `ccasr setup`         | Interactive setup wizard — creates or edits `~/.ccasr/config.json` |
+| `ccasr start`         | Start the proxy server (foreground, Ctrl-C to stop)                |
+| `ccasr run <command>` | Start proxy + launch command (e.g. `ccasr run claude`)             |
+| `ccasr gateway`       | Start in gateway mode — no config file, per-request credentials    |
+| `ccasr version`       | Print version and Node version                                     |
+| `ccasr help`          | Show usage instructions                                            |
 
 ## Supported providers
 
-| Provider | Type | Use case |
-|----------|------|----------|
-| **Anthropic** | Native pass-through | Route back to Anthropic API directly |
-| **OpenRouter** | OpenAI-compatible | Access many models through one API |
-| **Gemini** | Custom format | Google's models with tool call translation |
-| **OpenAI** | Native format | GPT-4o, GPT-4.1, etc. |
-| **Groq** | OpenAI-compatible | Fast Llama/Mixtral inference |
-| **Mistral** | OpenAI-compatible | Codestral and Mistral models |
-| **Ollama** | OpenAI-compatible | Fully offline local models |
+| Provider       | Type                | Use case                                   |
+| -------------- | ------------------- | ------------------------------------------ |
+| **Anthropic**  | Native pass-through | Route back to Anthropic API directly       |
+| **OpenRouter** | OpenAI-compatible   | Access many models through one API         |
+| **Gemini**     | Custom format       | Google's models with tool call translation |
+| **OpenAI**     | Native format       | GPT-4o, GPT-4.1, etc.                      |
+| **Groq**       | OpenAI-compatible   | Fast Llama/Mixtral inference               |
+| **Mistral**    | OpenAI-compatible   | Codestral and Mistral models               |
+| **Ollama**     | OpenAI-compatible   | Fully offline local models                 |
 
 These 7 providers are hard-wired. No others can be added without modifying source code. This is intentional.
 
 ## API endpoints
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `POST` | `/v1/messages` | Main routing endpoint — accepts Anthropic format, routes to configured provider |
-| `GET` | `/health` | Health check — returns status, version, providers, mode |
-| `POST` | `/v1/credentials` | Register a credential with TTL (gateway mode only) |
-| `DELETE` | `/v1/credentials/:id` | Revoke a credential (gateway mode only) |
+| Method   | Path                  | Purpose                                                                         |
+| -------- | --------------------- | ------------------------------------------------------------------------------- |
+| `POST`   | `/v1/messages`        | Main routing endpoint — accepts Anthropic format, routes to configured provider |
+| `GET`    | `/health`             | Health check — returns status, version, providers, mode                         |
+| `POST`   | `/v1/credentials`     | Register a credential with TTL (gateway mode only)                              |
+| `DELETE` | `/v1/credentials/:id` | Revoke a credential (gateway mode only)                                         |
 
 ---
 
@@ -191,11 +191,11 @@ Config lives at `~/.ccasr/config.json` (JSON5 — comments allowed). Created aut
 
 Route sets let you define different model mixes and switch between them without editing config:
 
-| Route set | Use case | Example |
-|-----------|----------|---------|
-| `direct` | Full Anthropic, maximum quality | All tiers use Anthropic models |
-| `mixed` | Balance cost and quality | Sonnet via OpenRouter, Haiku via Gemini |
-| `cheap` | Minimize cost for development | Everything through Gemini Flash |
+| Route set | Use case                        | Example                                 |
+| --------- | ------------------------------- | --------------------------------------- |
+| `direct`  | Full Anthropic, maximum quality | All tiers use Anthropic models          |
+| `mixed`   | Balance cost and quality        | Sonnet via OpenRouter, Haiku via Gemini |
+| `cheap`   | Minimize cost for development   | Everything through Gemini Flash         |
 
 Switch at runtime with `--route`:
 
@@ -210,11 +210,11 @@ All commands accept `--config <path>` to use an alternative config file and `--r
 
 Claude Code sends Anthropic model names (e.g. `claude-sonnet-4-20250514`). The proxy classifies the incoming model into a tier and routes it to the configured provider and model for that tier:
 
-| Tier | Matches model names containing | Use case |
-|------|-------------------------------|----------|
-| `opus` | `opus` | Powerful tasks |
-| `sonnet` | `sonnet` (or unrecognized) | Primary workhorse, default fallback |
-| `haiku` | `haiku` | Fast/cheap tasks, subagents |
+| Tier     | Matches model names containing | Use case                            |
+| -------- | ------------------------------ | ----------------------------------- |
+| `opus`   | `opus`                         | Powerful tasks                      |
+| `sonnet` | `sonnet` (or unrecognized)     | Primary workhorse, default fallback |
+| `haiku`  | `haiku`                        | Fast/cheap tasks, subagents         |
 
 If a tier is not configured, it falls back to `sonnet`. The proxy replaces **both** the provider and the model name — so if sonnet maps to `"openai,gpt-4.1"`, the request reaches OpenAI with `model: "gpt-4.1"`.
 
@@ -246,6 +246,7 @@ Interactive, menu-driven configuration editor. On first run it walks you through
 ```
 
 **Edit route sets** opens a sub-menu where you can:
+
 - Edit an existing route set's tier assignments
 - Add a new named route set
 - Remove a route set (cannot remove the active one)
@@ -269,12 +270,12 @@ ccasr run claude --model opus       # launch with flags
 
 Logs are written to `~/.ccasr/logs/ccasr.log` with automatic rotation (default: rotate at 10MB, keep 5 files). Console output is always active.
 
-| Config key | Default | Description |
-|------------|---------|-------------|
-| `LOG` | `false` | Enable debug-level logging (request bodies to console) |
-| `LOG_FILE` | `true` | Write logs to `~/.ccasr/logs/ccasr.log` |
-| `LOG_MAX_SIZE` | `"10m"` | Rotate log file at this size |
-| `LOG_MAX_FILES` | `5` | Number of rotated files to keep |
+| Config key      | Default | Description                                            |
+| --------------- | ------- | ------------------------------------------------------ |
+| `LOG`           | `false` | Enable debug-level logging (request bodies to console) |
+| `LOG_FILE`      | `true`  | Write logs to `~/.ccasr/logs/ccasr.log`                |
+| `LOG_MAX_SIZE`  | `"10m"` | Rotate log file at this size                           |
+| `LOG_MAX_FILES` | `5`     | Number of rotated files to keep                        |
 
 Set `"LOG_FILE": false` to disable file logging entirely.
 
@@ -313,6 +314,7 @@ os.environ["ANTHROPIC_MODEL"] = "openrouter,google/gemini-2.5-flash"
 ```
 
 That's it. The SDK sends requests to ccasr, which:
+
 1. Extracts `openrouter` as the provider and `google/gemini-2.5-flash` as the model
 2. Uses the incoming `x-api-key` (`sk-or-v1-...`) as the OpenRouter API key
 3. Converts Anthropic format to OpenAI format, sends to OpenRouter
@@ -322,15 +324,15 @@ That's it. The SDK sends requests to ccasr, which:
 
 The primary routing mechanism uses `"provider,model"` format:
 
-| Provider | Model field |
-|----------|-------------|
-| Anthropic | `anthropic,claude-sonnet-4-20250514` |
+| Provider   | Model field                          |
+| ---------- | ------------------------------------ |
+| Anthropic  | `anthropic,claude-sonnet-4-20250514` |
 | OpenRouter | `openrouter,google/gemini-2.5-flash` |
-| Gemini | `gemini,gemini-2.5-flash` |
-| OpenAI | `openai,gpt-4.1` |
-| Groq | `groq,llama-3.3-70b-versatile` |
-| Mistral | `mistral,codestral-latest` |
-| Ollama | `ollama,qwen2.5-coder:latest` |
+| Gemini     | `gemini,gemini-2.5-flash`            |
+| OpenAI     | `openai,gpt-4.1`                     |
+| Groq       | `groq,llama-3.3-70b-versatile`       |
+| Mistral    | `mistral,codestral-latest`           |
+| Ollama     | `ollama,qwen2.5-coder:latest`        |
 
 ## Model tier fallback
 
@@ -339,6 +341,7 @@ Claude Code internally switches model tiers — it may send `claude-haiku-4-5-20
 In gateway mode, there are no route sets. Instead, **bare model names fall back to the same provider and model as the session's main `"provider,model"` request.** The gateway remembers the provider,model from the first explicit `"provider,model"` request per session (keyed by `x-api-key` header), and routes all subsequent bare model names to the same destination.
 
 Example: if `ANTHROPIC_MODEL=openrouter,google/gemini-2.5-flash`, then:
+
 - `model: "openrouter,google/gemini-2.5-flash"` — routes to OpenRouter / gemini-2.5-flash (and remembers this)
 - `model: "claude-haiku-4-5-20241022"` — also routes to OpenRouter / gemini-2.5-flash (fallback)
 - `model: "claude-opus-4-20250514"` — also routes to OpenRouter / gemini-2.5-flash (fallback)
@@ -347,13 +350,13 @@ This means all tiers go to the same model, which is suboptimal but ensures nothi
 
 ## Credential resolution
 
-| Priority | Source | When to use |
-|----------|--------|-------------|
-| 1 | `X-Provider-Api-Key` header | Raw SDK clients that can set custom headers |
-| 2 | `X-Credential-Id` header | Multi-tenant apps using the credential store |
-| 3 | Passthrough (`x-api-key` / `Authorization: Bearer`) | Agent SDK — the only option since custom headers can't be injected |
-| 4 | Pre-configured key (from `createGateway({ providers })`) | Single-tenant deployments with known keys |
-| 5 | 401 error | No key found |
+| Priority | Source                                                   | When to use                                                        |
+| -------- | -------------------------------------------------------- | ------------------------------------------------------------------ |
+| 1        | `X-Provider-Api-Key` header                              | Raw SDK clients that can set custom headers                        |
+| 2        | `X-Credential-Id` header                                 | Multi-tenant apps using the credential store                       |
+| 3        | Passthrough (`x-api-key` / `Authorization: Bearer`)      | Agent SDK — the only option since custom headers can't be injected |
+| 4        | Pre-configured key (from `createGateway({ providers })`) | Single-tenant deployments with known keys                          |
+| 5        | 401 error                                                | No key found                                                       |
 
 Passthrough (priority 3) is only active when `proxySecret` is NOT set — these are mutually exclusive. Localhost binding is the security boundary.
 
@@ -420,11 +423,11 @@ When `--secret` is set, every request must include `x-api-key: my-proxy-token`. 
 
 Gateway mode intentionally minimizes logging to protect multi-tenant credential and payload privacy:
 
-| Log type | Standard mode | Gateway mode | Why |
-|----------|--------------|--------------|-----|
-| Fastify request/response lines | Console + file | Console only | Basic HTTP status logging, no sensitive data |
-| 4-point payload capture (`claude_in`/`provider_out`/`provider_in`/`claude_out`) | When `LOG: true` | Disabled | Full request/response bodies would leak user credentials and content |
-| File logging (`~/.ccasr/logs/`) | On by default | Off by default | No disk writes of potentially sensitive multi-tenant data |
+| Log type                                                                        | Standard mode    | Gateway mode   | Why                                                                  |
+| ------------------------------------------------------------------------------- | ---------------- | -------------- | -------------------------------------------------------------------- |
+| Fastify request/response lines                                                  | Console + file   | Console only   | Basic HTTP status logging, no sensitive data                         |
+| 4-point payload capture (`claude_in`/`provider_out`/`provider_in`/`claude_out`) | When `LOG: true` | Disabled       | Full request/response bodies would leak user credentials and content |
+| File logging (`~/.ccasr/logs/`)                                                 | On by default    | Off by default | No disk writes of potentially sensitive multi-tenant data            |
 
 - **Console logging** (`logToConsole`): On by default. Shows Fastify request/response status lines (method, URL, status code, latency). No request bodies or API keys.
 - **Payload capture**: Always disabled in gateway mode. The `CaptureLogger` is never created — all capture blocks in `router.ts` are skipped.
@@ -531,6 +534,7 @@ See [SECURITY.md](SECURITY.md) for the full security analysis and verification c
 ## Acknowledgments
 
 This project is inspired by and builds upon the work of [musistudio](https://github.com/musistudio):
+
 - [claude-code-router](https://github.com/musistudio/claude-code-router) — the original Claude Code routing proxy
 - [llms](https://github.com/musistudio/llms) — the universal LLM API transformation library
 
