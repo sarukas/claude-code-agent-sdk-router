@@ -79,6 +79,8 @@ export interface UnifiedMessage {
   tool_call_id?: string;
   cache_control?: { type?: string };
   thinking?: { content: string; signature?: string };
+  reasoning?: string;
+  reasoning_details?: Record<string, unknown>[];
 }
 
 export interface ToolCall {
@@ -135,7 +137,7 @@ export interface Transformer {
   transformResponseOut?(response: Response, logger?: any): Promise<Response>;
 
   /** Unified/OpenAI response → Anthropic response (outbound to Claude Code) */
-  transformResponseIn?(response: Response): Promise<Response>;
+  transformResponseIn?(response: Response, clientModel?: string): Promise<Response>;
 
   /** Auth header setup */
   auth?(request: any, provider: ProviderConfig): Promise<{ body: any; config: { headers: Record<string, string | undefined> } }>;

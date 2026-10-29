@@ -16,7 +16,7 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { ProviderConfig, Transformer } from './core/types';
 import type { ServerContext } from './core/server';
 import { createApiError } from './core/api/middleware';
-import { TRANSFORMERS } from './core/transformers/registry';
+import { createTransformer } from './core/transformers/registry';
 // Lazy-load undici ProxyAgent — only needed when PROXY_URL is set.
 let _ProxyAgent: (new (url: string) => any) | undefined;
 function getProxyAgent(url: string): any {
@@ -102,13 +102,13 @@ export async function routeRequest(
   }
 
   // Get the Anthropic transformer (always the endpoint transformer for Claude Code)
-  const anthropicTransformer = TRANSFORMERS.anthropic;
+  const anthropicTransformer = createTransformer('anthropic');
   if (!anthropicTransformer) {
     throw createApiError('Anthropic transformer not available', 500, 'internal_error');
   }
 
   // Get the provider-specific transformer
-  const providerTransformer = TRANSFORMERS[provider.name as keyof typeof TRANSFORMERS];
+  const providerTransformer = createTransformer(provider.name);
 
   // Determine if this is a direct Anthropic pass-through
   const isAnthropicDirect = provider.name === 'anthropic';
@@ -254,7 +254,10 @@ export async function routeRequest(
 
     // Step 4: Unified (OpenAI) → Anthropic format
     if (anthropicTransformer.transformResponseIn) {
-      finalResponse = await anthropicTransformer.transformResponseIn(finalResponse);
+      // The SDK removes signed/opaque thinking from messages whose model differs
+      // from the requested alias. Keep that client-facing identity stable while
+      // provider captures retain the actual routed model.
+      finalResponse = await anthropicTransformer.transformResponseIn(finalResponse, (request as any).clientModel);
     }
   }
 

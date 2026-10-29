@@ -1,7 +1,7 @@
 {
   "name": "claude-code-agent-sdk-router",
   "version": "0.1.4",
-  "description": "Minimal, auditable Claude Code and Agent SDK router — Anthropic · OpenRouter · Gemini · OpenAI · Groq · Mistral · Ollama",
+  "description": "Minimal, auditable Claude Code and Agent SDK router \u2014 Anthropic \u00b7 OpenRouter \u00b7 Gemini \u00b7 OpenAI \u00b7 Groq \u00b7 Mistral \u00b7 Ollama",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "commonjs",
@@ -26,7 +26,7 @@
     "setup": "tsx src/cli.ts setup",
     "typecheck": "tsc --noEmit",
     "test": "tsx tests/runner.ts",
-    "test:unit": "tsx tests/unit/streamUsage.test.ts",
+    "test:unit": "tsx tests/unit/streamUsage.test.ts && tsx --test tests/unit/geminiCompatibility.test.ts",
     "test:provider": "tsx tests/runner.ts http://127.0.0.1:3456",
     "audit:security": "grep -rn 'vm\\.runInContext\\|vm\\.createContext\\|require(.*path\\|new Function(' src/ && echo 'FAIL: dynamic code found' || echo 'PASS: no dynamic code'"
   },

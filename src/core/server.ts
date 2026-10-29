@@ -101,6 +101,7 @@ export async function createServer(configPath?: string, activeRoute?: string, op
     }
 
     // Parse "provider,model" format
+    (request as any).clientModel = body.model;
     const comma = (body.model as string).indexOf(',');
     if (comma === -1) {
       // No provider prefix — resolve tier from model name
@@ -236,6 +237,7 @@ export async function createGateway(options: GatewayOptions = {}): Promise<Gatew
       return reply.code(400).send({ error: { message: 'Missing model in request body', type: 'invalid_request' } });
     }
 
+    (request as any).clientModel = body.model;
     const comma = (body.model as string).indexOf(',');
     if (comma === -1) {
       // Bare model name (e.g., "claude-haiku-4-5-20241022") — fall back to

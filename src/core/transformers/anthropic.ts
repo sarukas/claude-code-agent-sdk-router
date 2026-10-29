@@ -12,6 +12,7 @@ import { getThinkLevel } from '../utils/thinking';
 import { createApiError } from '../api/middleware';
 import { generateId, generateMessageId, generateToolUseId } from '../utils/id';
 import { mapOpenAIUsage } from '../utils/openaiToAnthropic';
+import { encodeOpenRouterReasoning, decodeOpenRouterReasoning } from '../utils/openrouterReasoning';
 
 export class AnthropicTransformer implements Transformer {
   name = 'Anthropic';
@@ -120,6 +121,16 @@ export class AnthropicTransformer implements Transformer {
           assistantMsg.thinking = { content: thinkingPart.thinking, signature: thinkingPart.signature };
         }
 
+        for (const part of msg.content) {
+          if (part.type !== 'redacted_thinking') continue;
+          const saved = decodeOpenRouterReasoning(part.data, request.model);
+          if (!saved) continue;
+          if (saved.reasoning_details?.length) {
+            (assistantMsg.reasoning_details ??= []).push(...saved.reasoning_details);
+          }
+          if (saved.reasoning !== undefined) assistantMsg.reasoning = (assistantMsg.reasoning ?? '') + saved.reasoning;
+        }
+
         messages.push(assistantMsg);
       }
     }
@@ -153,12 +164,12 @@ export class AnthropicTransformer implements Transformer {
   }
 
   // OpenAI response → Anthropic format (handles both JSON and streaming)
-  async transformResponseIn(response: Response): Promise<Response> {
+  async transformResponseIn(response: Response, clientModel?: string): Promise<Response> {
     const isStream = response.headers.get('Content-Type')?.includes('text/event-stream');
 
     if (isStream) {
       if (!response.body) throw new Error('Stream response body is null');
-      const converted = this.convertOpenAIStreamToAnthropic(response.body);
+      const converted = this.convertOpenAIStreamToAnthropic(response.body, clientModel);
       return new Response(converted, {
         headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
       });
@@ -166,6 +177,7 @@ export class AnthropicTransformer implements Transformer {
 
     const data = await response.json() as any;
     const anthropicResponse = this.convertOpenAIResponseToAnthropic(data);
+    if (clientModel) anthropicResponse.model = clientModel;
     return new Response(JSON.stringify(anthropicResponse), {
       headers: { 'Content-Type': 'application/json' },
     });
@@ -183,7 +195,7 @@ export class AnthropicTransformer implements Transformer {
   }
 
   // Complex streaming state machine: OpenAI SSE → Anthropic SSE
-  private convertOpenAIStreamToAnthropic(openaiStream: ReadableStream): ReadableStream {
+  private convertOpenAIStreamToAnthropic(openaiStream: ReadableStream, clientModel?: string): ReadableStream {
     const self = this;
     return new ReadableStream({
       start: async (controller) => {
@@ -266,7 +278,7 @@ export class AnthropicTransformer implements Transformer {
                   continue;
                 }
 
-                model = chunk.model || model;
+                model = clientModel || chunk.model || model;
 
                 // Send message_start on first chunk
                 if (!hasStarted && !isClosed) {
@@ -294,6 +306,21 @@ export class AnthropicTransformer implements Transformer {
                 }
 
                 if (!choice) continue;
+
+                // OpenRouter's Gemini adapter emits the complete carrier before
+                // answer/tool blocks so the SDK's final result stays textual.
+                if (choice.delta?.ccasr_reasoning) {
+                  if (currentContentBlockIndex >= 0) {
+                    emitEvent('content_block_stop', { type: 'content_block_stop', index: currentContentBlockIndex });
+                    currentContentBlockIndex = -1;
+                  }
+                  hasTextContentStarted = false;
+                  isThinkingStarted = false;
+                  const idx = assignBlockIndex();
+                  emitEvent('content_block_start', { type: 'content_block_start', index: idx,
+                    content_block: { type: 'redacted_thinking', data: encodeOpenRouterReasoning(choice.delta.ccasr_reasoning) } });
+                  emitEvent('content_block_stop', { type: 'content_block_stop', index: idx });
+                }
 
                 // Thinking content
                 if (choice.delta?.thinking && !isClosed) {
@@ -438,6 +465,10 @@ export class AnthropicTransformer implements Transformer {
       if (!choice) throw new Error('No choices in OpenAI response');
 
       const content: any[] = [];
+
+      if (choice.message?.ccasr_reasoning) {
+        content.push({ type: 'redacted_thinking', data: encodeOpenRouterReasoning(choice.message.ccasr_reasoning) });
+      }
 
       // Annotations → web search results
       if (choice.message?.annotations) {

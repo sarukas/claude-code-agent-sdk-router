@@ -8,20 +8,30 @@
 // Based on musistudio/llms openrouter.transformer.ts (MIT), simplified.
 
 import type { Transformer, UnifiedChatRequest, ProviderConfig } from '../types';
-import { generateToolId } from '../utils/id';
 import { sanitizeToolName, buildToolNameMap, restoreToolName } from '../utils/toolNameSanitizer';
 
 export class OpenRouterTransformer implements Transformer {
   name = 'openrouter';
+  private model = '';
   private toolNameMap: Map<string, string> = new Map();
 
   async transformRequestIn(request: UnifiedChatRequest, provider: ProviderConfig): Promise<Record<string, any>> {
+    this.model = request.model;
     const isClaude = request.model.includes('claude');
     const isGemini = request.model.includes('google/') || request.model.includes('gemini');
     // OpenRouter normalizes cache_control breakpoints for Anthropic, Gemini,
     // and OpenAI models (interchangeable markers). Keep them for those;
     // strip for the rest, which may reject unknown fields with a 400.
     const keepsCacheControl = isClaude || isGemini || request.model.startsWith('openai/');
+
+    // Gemini 3.8 cannot disable reasoning. SDK helper calls may explicitly
+    // request disabled/zero thinking; use a small valid effort for this family.
+    // Optional-reasoning models (including Gemini 2.5) retain caller controls.
+    if (/^google\/gemini-3\.8(?:-|$)/.test(request.model) &&
+        (request.reasoning?.enabled === false || request.reasoning?.effort === 'none' || request.reasoning?.max_tokens === 0)) {
+      request.reasoning = { ...request.reasoning, enabled: true, effort: 'low' };
+      delete request.reasoning.max_tokens;
+    }
 
     // Sanitize tool names for Gemini models (rejects consecutive underscores)
     if (isGemini && request.tools?.length) {
@@ -72,8 +82,22 @@ export class OpenRouterTransformer implements Transformer {
 
   async transformResponseOut(response: Response): Promise<Response> {
     const nameMap = this.toolNameMap;
+    const routedModel = this.model;
+    const bufferGemini = /(?:^google\/gemini-|^gemini-)/.test(routedModel);
+    const carryReasoning = (message: any) => {
+      if (!message) return;
+      if (message.reasoning_details?.length || typeof message.reasoning === 'string') {
+        message.ccasr_reasoning = { model: routedModel,
+          ...(message.reasoning_details?.length ? {reasoning_details: message.reasoning_details} : {}),
+          ...(typeof message.reasoning === 'string' ? {reasoning: message.reasoning} : {}),
+        };
+      }
+      delete message.reasoning;
+      delete message.reasoning_details;
+    };
     if (response.headers.get('Content-Type')?.includes('application/json')) {
       const json: any = await response.json();
+      carryReasoning(json.choices?.[0]?.message);
       // Restore sanitized tool names in JSON response
       if (nameMap.size > 0 && json.choices?.[0]?.message?.tool_calls) {
         for (const tc of json.choices[0].message.tool_calls) {
@@ -93,10 +117,42 @@ export class OpenRouterTransformer implements Transformer {
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
     let hasTextContent = false;
-    let reasoningContent = '';
-    let isReasoningComplete = false;
     let hasToolCall = false;
     let buffer = '';
+    const pending: any[] = [];
+    let pendingBytes = 0;
+    // Gemini may attach opaque state to the last tool/text chunk. The SDK uses
+    // the last content block as its final result, so the carrier must precede
+    // the answer. Buffer this provider response (not the whole agent run) to
+    // preserve metadata without emitting an invalid out-of-order signature.
+    const emitChunk = (data: any, ctrl: ReadableStreamDefaultController) => {
+      if (bufferGemini) {
+        pendingBytes += Buffer.byteLength(JSON.stringify(data));
+        if (pendingBytes > 16 * 1024 * 1024) throw new Error('Gemini response exceeds 16 MiB compatibility buffer');
+        pending.push(data);
+      } else {
+        ctrl.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      }
+    };
+    const flushPending = (ctrl: ReadableStreamDefaultController) => {
+      const reasoning: any = { model: routedModel };
+      for (const chunk of pending) {
+        const delta = chunk.choices?.[0]?.delta;
+        const part = delta?.ccasr_reasoning;
+        if (!part) continue;
+        if (part.reasoning_details?.length) (reasoning.reasoning_details ??= []).push(...part.reasoning_details);
+        if (part.reasoning !== undefined) reasoning.reasoning = (reasoning.reasoning ?? '') + part.reasoning;
+        delete delta.ccasr_reasoning;
+      }
+      if (reasoning.reasoning_details?.length || reasoning.reasoning !== undefined) {
+        const initial = { id: pending[0]?.id, model: pending[0]?.model ?? routedModel,
+          choices: [{index:0, delta:{ccasr_reasoning:reasoning}, finish_reason:null}] };
+        ctrl.enqueue(encoder.encode(`data: ${JSON.stringify(initial)}\n\n`));
+      }
+      for (const chunk of pending) ctrl.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+      pending.length = 0;
+      ctrl.enqueue(encoder.encode('data: [DONE]\n\n'));
+    };
 
     const stream = new ReadableStream({
       start: async (controller) => {
@@ -108,7 +164,7 @@ export class OpenRouterTransformer implements Transformer {
             if (done) {
               if (buffer.trim()) {
                 for (const line of buffer.split('\n')) {
-                  if (line.trim()) controller.enqueue(encoder.encode(line + '\n'));
+                  if (line.trim()) processLine(line, controller);
                 }
               }
               break;
@@ -137,14 +193,16 @@ export class OpenRouterTransformer implements Transformer {
               if (line.trim()) processLine(line, controller);
             }
           }
+          if (bufferGemini) flushPending(controller);
+          controller.close();
         } catch (e) {
           controller.error(e);
         } finally {
           try { reader.releaseLock(); } catch { /* ignore */ }
-          controller.close();
         }
 
         function processLine(line: string, ctrl: ReadableStreamDefaultController) {
+          if (bufferGemini && line.trim() === 'data: [DONE]') return;
           if (!line.startsWith('data: ') || line.trim() === 'data: [DONE]') {
             ctrl.enqueue(encoder.encode(line + '\n'));
             return;
@@ -168,28 +226,10 @@ export class OpenRouterTransformer implements Transformer {
               hasTextContent = true;
             }
 
-            // Reasoning content extraction
-            if (data.choices?.[0]?.delta?.reasoning) {
-              reasoningContent += data.choices[0].delta.reasoning;
-              const thinkingChunk = { ...data, choices: [{ ...data.choices[0], delta: { ...data.choices[0].delta, thinking: { content: data.choices[0].delta.reasoning } } }] };
-              delete thinkingChunk.choices[0].delta.reasoning;
-              ctrl.enqueue(encoder.encode(`data: ${JSON.stringify(thinkingChunk)}\n\n`));
-              return;
-            }
-
-            if (data.choices?.[0]?.delta?.content && reasoningContent && !isReasoningComplete) {
-              isReasoningComplete = true;
-              const sigChunk = { ...data, choices: [{ ...data.choices[0], delta: { ...data.choices[0].delta, content: null, thinking: { content: reasoningContent, signature: Date.now().toString() } } }] };
-              delete sigChunk.choices[0].delta.reasoning;
-              ctrl.enqueue(encoder.encode(`data: ${JSON.stringify(sigChunk)}\n\n`));
-            }
-
-            if (data.choices?.[0]?.delta?.reasoning) delete data.choices[0].delta.reasoning;
-
-            // Normalize numeric tool call IDs
-            if (data.choices?.[0]?.delta?.tool_calls?.length && !Number.isNaN(parseInt(data.choices[0].delta.tool_calls[0].id, 10))) {
-              for (const tool of data.choices[0].delta.tool_calls) tool.id = generateToolId();
-            }
+            // Keep every reasoning detail and identifier, including encrypted
+            // state attached to a tool call. The Anthropic adapter persists it
+            // as opaque data, not a fabricated Claude thinking signature.
+            carryReasoning(data.choices?.[0]?.delta);
 
             // Restore sanitized tool names for Gemini models
             if (nameMap.size > 0 && data.choices?.[0]?.delta?.tool_calls?.length) {
@@ -204,8 +244,9 @@ export class OpenRouterTransformer implements Transformer {
               data.choices[0].index = typeof data.choices[0].index === 'number' ? data.choices[0].index + 1 : 1;
             }
 
-            ctrl.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
-          } catch {
+            emitChunk(data, ctrl);
+          } catch (error) {
+            if (!(error instanceof SyntaxError)) throw error;
             ctrl.enqueue(encoder.encode(line + '\n'));
           }
         }
